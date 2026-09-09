@@ -12,6 +12,7 @@ import pandas as pd
 import requests
 
 from .dataset import build_batter_games
+from .matchups import build_matchup_features
 
 MLB_API = "https://statsapi.mlb.com/api/v1"
 
@@ -137,14 +138,47 @@ def _rating_label(rating: float) -> str:
 
 
 def _assign_ratings(board: pd.DataFrame) -> pd.DataFrame:
-    """Convert internal probabilities into slate-relative public ratings."""
+    """Convert the internal composite ranking into slate-relative ratings."""
     n = len(board)
     if n == 1:
         board["hr_rating"] = 10.0
     else:
-        ranks = board["hr_probability"].rank(method="first", ascending=False)
+        ranks = board["ranking_score"].rank(method="first", ascending=False)
         board["hr_rating"] = (10.0 - 9.0 * (ranks - 1) / (n - 1)).round(1)
     board["rating"] = board["hr_rating"].map(_rating_label)
+    return board
+
+
+def _add_matchup_context(board: pd.DataFrame, historical_raw: pd.DataFrame, day: date) -> pd.DataFrame:
+    """Add a small pitcher-matchup adjustment without letting it dominate skill."""
+    if "pitch_type" not in historical_raw.columns or "pitcher" not in historical_raw.columns:
+        board["matchup_score"] = 0.5
+        board["ranking_score"] = board["hr_probability"].rank(pct=True)
+        return board
+
+    before = pd.Timestamp(day)
+    scores: list[float] = []
+    for row in board.itertuples(index=False):
+        pitcher_id = getattr(row, "opposing_pitcher_id", None)
+        if pd.isna(pitcher_id) or pitcher_id in (None, ""):
+            scores.append(float("nan"))
+            continue
+        try:
+            matchup = build_matchup_features(
+                historical_raw,
+                int(pitcher_id) if False else int(pitcher_id),
+                int(pitcher_id),
+                before,
+            )
+        except (KeyError, TypeError, ValueError):
+            scores.append(float("nan"))
+            continue
+        scores.append(matchup.get("pitch_matchup_combined_risk", float("nan")))
+
+    board["matchup_score"] = pd.to_numeric(scores, errors="coerce")
+    baseline_rank = board["hr_probability"].rank(pct=True)
+    matchup_rank = board["matchup_score"].rank(pct=True).fillna(0.5)
+    board["ranking_score"] = 0.85 * baseline_rank + 0.15 * matchup_rank
     return board
 
 
@@ -163,9 +197,12 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
         away_name = away.get("team", {}).get("name", "")
         away_pitcher = away.get("probablePitcher", {}).get("fullName", "TBD")
         home_pitcher = home.get("probablePitcher", {}).get("fullName", "TBD")
+        away_pitcher_id = away.get("probablePitcher", {}).get("id")
+        home_pitcher_id = home.get("probablePitcher", {}).get("id")
         for row in _lineup(game):
             row["game_time"] = game.get("gameDate", "")
             row["opposing_pitcher"] = home_pitcher if row["team"] == away_name else away_pitcher
+            row["opposing_pitcher_id"] = home_pitcher_id if row["team"] == away_name else away_pitcher_id
             candidates.append(row)
 
     board = pd.DataFrame(candidates)
@@ -177,7 +214,8 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
     board = board.merge(latest[["batter", *features]], on="batter", how="left")
     X = board[features].replace([float("inf"), float("-inf")], pd.NA).fillna(0)
     board["hr_probability"] = model.predict_proba(X)
-    board = board.sort_values("hr_probability", ascending=False).reset_index(drop=True)
+    board = _add_matchup_context(board, raw, day)
+    board = board.sort_values("ranking_score", ascending=False).reset_index(drop=True)
     board["model_rank"] = board.index + 1
     return _assign_ratings(board)
 
