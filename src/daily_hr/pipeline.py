@@ -69,6 +69,6 @@ def add_prior_game_rolls(
             "avg_launch_angle",
         ):
             out[f"{column}_last_{window}"] = grouped[column].transform(
-                lambda s: s.shift(1).rolling(window, min_periods=1).mean()
+                lambda s, window=window: s.shift(1).rolling(window, min_periods=1).mean()
             )
     return out
