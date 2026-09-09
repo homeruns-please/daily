@@ -1,0 +1,45 @@
+name: live-hr-board
+
+on:
+  schedule:
+    - cron: "17,47 15-23 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+
+jobs:
+  live-board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e .
+      - name: Set date
+        run: echo "TODAY=$(date -u +%F)" >> "$GITHUB_ENV"
+      - name: Download today's model package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p live-artifact
+          gh run download \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "daily-hr-board-${TODAY}" \
+            --dir live-artifact
+      - name: Build live calibrated board
+        run: |
+          daily-hr-live-board \
+            live-artifact/data/raw/statcast.csv \
+            live-artifact/models/hr_model.joblib \
+            live-artifact/models/hr_model.features.json \
+            reports/hr_live_board.csv \
+            --date "$TODAY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: live-hr-board-${{ env.TODAY }}
+          path: reports/hr_live_board.csv
+          retention-days: 2
