@@ -108,9 +108,9 @@ def apply_live_calibration(
     observed_model_pct = model_pct.loc[observed.index].mean()
     model_confirmation = np.clip(observed_model_pct - 0.5, -0.5, 0.5)
     live_signal = 0.75 * feature_signal + 0.25 * model_confirmation
-    adjustment = (live_signal * MAX_LIVE_ADJUSTMENT * min(1.0, n / 5.0)).clip(
-        -MAX_LIVE_ADJUSTMENT, MAX_LIVE_ADJUSTMENT
-    )
+    adjustment = (
+        live_signal * MAX_LIVE_ADJUSTMENT * min(1.0, n / 5.0)
+    ).clip(-MAX_LIVE_ADJUSTMENT, MAX_LIVE_ADJUSTMENT)
 
     if eligible_game_pks is None:
         eligible = pd.Series(True, index=board.index)
@@ -142,7 +142,8 @@ def build_live_board(
     eligible_game_pks = {
         int(game["gamePk"])
         for game in games
-        if game.get("status", {}).get("abstractGameState") != "Final" and game.get("gamePk")
+        if game.get("status", {}).get("abstractGameState") != "Final"
+        and game.get("gamePk")
     }
     board = apply_live_calibration(board, hr_hitters, eligible_game_pks)
     board = board.sort_values("ranking_score", ascending=False).reset_index(drop=True)
@@ -171,7 +172,13 @@ def main() -> None:
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     board.to_csv(args.output, index=False)
-    columns = ["model_rank", "batter_name", "hr_rating", "live_hr_count", "live_calibration_adjustment"]
+    columns = [
+        "model_rank",
+        "batter_name",
+        "hr_rating",
+        "live_hr_count",
+        "live_calibration_adjustment",
+    ]
     print(board[columns].head(25).to_string(index=False))
 
 
