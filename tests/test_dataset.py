@@ -29,3 +29,6 @@ def test_training_features_exclude_current_game():
     assert third["hr_target"] == 1
     assert third["exit_velocity_avg_last_20"] == 95
     assert third["home_runs_last_20"] == 0.5
+    assert third["hr_rate_change_5_vs_20"] == 0
+    assert third["barrel_rate_change_5_vs_20"] == 0
+    assert third["exit_velocity_change_5_vs_20"] == 0
