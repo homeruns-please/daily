@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import joblib
@@ -87,7 +87,7 @@ def main() -> None:
     parser.add_argument("features", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument(
-        "--date", default=datetime.now(timezone.utc).date().isoformat()
+        "--date", default=datetime.now(UTC).date().isoformat()
     )
     args = parser.parse_args()
     board = build_board(
