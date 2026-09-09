@@ -55,7 +55,7 @@ def evaluate_snapshot(
         actual_hr.update(final_hr_by_game.get(game_pk, set()))
 
     if not actual_hr:
-        return {"eligible_players": int(len(eligible)), "actual_hr_hitters": 0}
+        return {"eligible_players": len(eligible), "actual_hr_hitters": 0}
 
     actual = eligible[eligible["batter"].isin(actual_hr)].copy()
     top10_baseline = set(eligible.nsmallest(10, "baseline_model_rank")["batter"])
@@ -64,12 +64,12 @@ def evaluate_snapshot(
     top20_live = set(eligible.nsmallest(20, "model_rank")["batter"])
 
     return {
-        "eligible_players": int(len(eligible)),
-        "actual_hr_hitters": int(len(actual)),
-        "baseline_top10_hr": int(len(actual_hr.intersection(top10_baseline))),
-        "live_top10_hr": int(len(actual_hr.intersection(top10_live))),
-        "baseline_top20_hr": int(len(actual_hr.intersection(top20_baseline))),
-        "live_top20_hr": int(len(actual_hr.intersection(top20_live))),
+        "eligible_players": len(eligible),
+        "actual_hr_hitters": len(actual),
+        "baseline_top10_hr": len(actual_hr.intersection(top10_baseline)),
+        "live_top10_hr": len(actual_hr.intersection(top10_live)),
+        "baseline_top20_hr": len(actual_hr.intersection(top20_baseline)),
+        "live_top20_hr": len(actual_hr.intersection(top20_live)),
         "baseline_avg_hr_rank": float(actual["baseline_model_rank"].mean()),
         "live_avg_hr_rank": float(actual["model_rank"].mean()),
         "avg_rank_improvement": float(
