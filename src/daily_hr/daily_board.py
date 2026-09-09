@@ -166,7 +166,7 @@ def _add_matchup_context(board: pd.DataFrame, historical_raw: pd.DataFrame, day:
         try:
             matchup = build_matchup_features(
                 historical_raw,
-                int(pitcher_id) if False else int(pitcher_id),
+                int(row.batter),
                 int(pitcher_id),
                 before,
             )
