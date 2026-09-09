@@ -36,9 +36,15 @@ jobs:
           data/raw/statcast.csv
           data/processed/hr_training.parquet
       - name: Train and evaluate
-        run: daily-hr-train data/processed/hr_training.parquet
+        run: >-
+          daily-hr-train
+          data/processed/hr_training.parquet
+          --model-out models/hr_model.joblib
       - uses: actions/upload-artifact@v4
         with:
-          name: hr-training-data
-          path: data/processed/hr_training.parquet
-          retention-days: 7
+          name: hr-model-${{ inputs.end }}
+          path: |
+            models/hr_model.joblib
+            models/hr_model.features.json
+            data/processed/hr_training.parquet
+          retention-days: 14
