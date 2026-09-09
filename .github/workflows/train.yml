@@ -1,0 +1,44 @@
+name: train-model
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "Historical start date (YYYY-MM-DD)"
+        required: true
+        default: "2025-03-27"
+      end:
+        description: "Historical end date (YYYY-MM-DD)"
+        required: true
+        default: "2026-09-08"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e .
+      - name: Download Statcast
+        run: >-
+          daily-hr-ingest
+          "${{ inputs.start }}"
+          "${{ inputs.end }}"
+          data/raw/statcast.csv
+          --chunk-days 7
+      - name: Build training table
+        run: >-
+          daily-hr-build
+          data/raw/statcast.csv
+          data/processed/hr_training.parquet
+      - name: Train and evaluate
+        run: daily-hr-train data/processed/hr_training.parquet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hr-training-data
+          path: data/processed/hr_training.parquet
+          retention-days: 7
