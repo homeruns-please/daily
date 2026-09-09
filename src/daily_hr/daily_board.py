@@ -178,7 +178,39 @@ def _add_matchup_context(board: pd.DataFrame, historical_raw: pd.DataFrame, day:
     board["matchup_score"] = pd.to_numeric(scores, errors="coerce")
     baseline_rank = board["hr_probability"].rank(pct=True)
     matchup_rank = board["matchup_score"].rank(pct=True).fillna(0.5)
+    board["baseline_rating"] = (1.0 + 9.0 * baseline_rank).round(1)
+    board["matchup_rating"] = (1.0 + 9.0 * matchup_rank).round(1)
     board["ranking_score"] = 0.85 * baseline_rank + 0.15 * matchup_rank
+    return board
+
+
+def _add_signal_breakdown(board: pd.DataFrame) -> pd.DataFrame:
+    """Add transparent descriptive signals; these explain inputs, not causal weights."""
+    def percentile(series: pd.Series) -> pd.Series:
+        return series.rank(pct=True).fillna(0.5)
+
+    components = {
+        "recent_power_rating": percentile(board["hr_per_pa_last_5"]),
+        "barrel_rating": percentile(board["barrel_pct_last_20"]),
+        "contact_quality_rating": percentile(board["hard_hit_pct_last_20"]),
+        "exit_velocity_rating": percentile(board["exit_velocity_avg_last_20"]),
+    }
+    for name, values in components.items():
+        board[name] = (1.0 + 9.0 * values).round(1)
+
+    def factor(row: pd.Series) -> str:
+        labels = {
+            "recent_power_rating": "Recent power",
+            "barrel_rating": "Barrel rate",
+            "contact_quality_rating": "Hard-hit rate",
+            "exit_velocity_rating": "Exit velocity",
+            "matchup_rating": "Pitcher matchup",
+        }
+        values = {key: row.get(key, 5.5) for key in labels}
+        top = sorted(values, key=values.get, reverse=True)[:2]
+        return " + ".join(labels[key] for key in top)
+
+    board["key_factors"] = board.apply(factor, axis=1)
     return board
 
 
@@ -215,6 +247,7 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
     X = board[features].replace([float("inf"), float("-inf")], pd.NA).fillna(0)
     board["hr_probability"] = model.predict_proba(X)
     board = _add_matchup_context(board, raw, day)
+    board = _add_signal_breakdown(board)
     board = board.sort_values("ranking_score", ascending=False).reset_index(drop=True)
     board["model_rank"] = board.index + 1
     return _assign_ratings(board)
@@ -244,6 +277,13 @@ def main() -> None:
         "lineup_slot",
         "hr_rating",
         "rating",
+        "baseline_rating",
+        "matchup_rating",
+        "recent_power_rating",
+        "barrel_rating",
+        "contact_quality_rating",
+        "exit_velocity_rating",
+        "key_factors",
         "expected_lineup",
     ]
     board[columns].to_csv(args.output, index=False)
