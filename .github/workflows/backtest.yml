@@ -1,0 +1,42 @@
+name: hr-weight-backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "First completed game date to test"
+        required: false
+        default: "2026-08-27"
+      end:
+        description: "Last completed game date to test"
+        required: false
+        default: "2026-09-09"
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e .
+      - name: Download Statcast history
+        run: |
+          daily-hr-ingest "${{ inputs.start || '2026-08-27' }}" "${{ inputs.end || '2026-09-09' }}" data/raw/statcast.csv --chunk-days 7
+      - name: Run walk-forward backtest
+        run: |
+          python -m daily_hr.backtest \
+            data/raw/statcast.csv \
+            reports/backtest_14d.csv \
+            --start "${{ inputs.start || '2026-08-27' }}" \
+            --end "${{ inputs.end || '2026-09-09' }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hr-weight-backtest-${{ inputs.start || '2026-08-27' }}-${{ inputs.end || '2026-09-09' }}
+          path: |
+            reports/backtest_14d.csv
+            reports/backtest_14d_summary.csv
+          retention-days: 14
