@@ -17,6 +17,40 @@ from .weather import get_weather
 
 MLB_API = "https://statsapi.mlb.com/api/v1"
 
+# Statcast HR park factors, 2024-2026 rolling values. 100 is neutral.
+# Source: Baseball Savant Statcast Park Factors leaderboard.
+PARK_HR_FACTORS = {
+    "Angel Stadium": 101,
+    "American Family Field": 88,
+    "Busch Stadium": 70,
+    "Chase Field": 213,
+    "Citi Field": 101,
+    "Citizens Bank Park": 115,
+    "Comerica Park": 100,
+    "Coors Field": 207,
+    "Daikin Park": 111,
+    "Fenway Park": 92,
+    "Globe Life Field": 94,
+    "Great American Ball Park": 81,
+    "Kauffman Stadium": 168,
+    "loanDepot park": 135,
+    "Nationals Park": 105,
+    "Oracle Park": 139,
+    "Oriole Park at Camden Yards": 110,
+    "Petco Park": 105,
+    "PNC Park": 74,
+    "Progressive Field": 60,
+    "Rate Field": 69,
+    "Rogers Centre": 69,
+    "T-Mobile Park": 37,
+    "Target Field": 113,
+    "Tropicana Field": 107,
+    "Truist Park": 100,
+    "Wrigley Field": 107,
+    "Yankee Stadium": 117,
+    "UNIQLO Field at Dodger Stadium": 124,
+}
+
 
 def _today_games(day: date) -> list[dict]:
     response = requests.get(
@@ -187,6 +221,30 @@ def _add_matchup_context(board: pd.DataFrame, historical_raw: pd.DataFrame, day:
     return board
 
 
+def _park_score(venue: str) -> float:
+    """Return a bounded HR environment score from Statcast park factors."""
+    factor = PARK_HR_FACTORS.get(venue)
+    if factor is None:
+        return 0.5
+    # Compress the extremes while preserving the direction of the park effect.
+    return max(0.0, min(1.0, 0.5 + (factor - 100.0) / 200.0))
+
+
+def _add_park_context(board: pd.DataFrame) -> pd.DataFrame:
+    """Add ballpark HR context before weather is applied."""
+    board["park_hr_factor"] = board["venue"].map(PARK_HR_FACTORS).fillna(100.0)
+    board["park_score"] = board["venue"].map(_park_score)
+    board["park_rating"] = (1.0 + 9.0 * board["park_score"]).round(1)
+    baseline_rank = board["hr_probability"].rank(pct=True)
+    matchup_rank = board["matchup_score"].rank(pct=True).fillna(0.5)
+    board["ranking_score"] = (
+        0.70 * baseline_rank
+        + 0.15 * matchup_rank
+        + 0.10 * board["park_score"]
+    )
+    return board
+
+
 def _weather_score(weather: dict[str, float | None]) -> float:
     """Return a conservative 0-1 game-environment score.
 
@@ -249,7 +307,12 @@ def _add_weather_context(board: pd.DataFrame, games: list[dict], day: date) -> p
     board["weather_temperature_f"] = temperatures
     board["weather_wind_mph"] = winds
     board["weather_wind_direction_deg"] = directions
-    board["ranking_score"] = 0.80 * board["hr_probability"].rank(pct=True) + 0.15 * board["matchup_score"].rank(pct=True).fillna(0.5) + 0.05 * board["weather_score"]
+    board["ranking_score"] = (
+        0.70 * board["hr_probability"].rank(pct=True)
+        + 0.15 * board["matchup_score"].rank(pct=True).fillna(0.5)
+        + 0.10 * board["park_score"]
+        + 0.05 * board["weather_score"]
+    )
     return board
 
 
@@ -274,6 +337,7 @@ def _add_signal_breakdown(board: pd.DataFrame) -> pd.DataFrame:
             "contact_quality_rating": "Hard-hit rate",
             "exit_velocity_rating": "Exit velocity",
             "matchup_rating": "Pitcher matchup",
+            "park_rating": "Ballpark",
             "weather_rating": "Weather",
         }
         values = {key: row.get(key, 5.5) for key in labels}
@@ -320,6 +384,7 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
     X = board[features].replace([float("inf"), float("-inf")], pd.NA).fillna(0)
     board["hr_probability"] = model.predict_proba(X)
     board = _add_matchup_context(board, raw, day)
+    board = _add_park_context(board)
     board = _add_weather_context(board, games, day)
     board = _add_signal_breakdown(board)
     board = board.sort_values("ranking_score", ascending=False).reset_index(drop=True)
@@ -349,10 +414,13 @@ def main() -> None:
         "opponent",
         "opposing_pitcher",
         "lineup_slot",
+        "venue",
+        "park_hr_factor",
         "hr_rating",
         "rating",
         "baseline_rating",
         "matchup_rating",
+        "park_rating",
         "weather_rating",
         "weather_temperature_f",
         "weather_wind_mph",
@@ -364,6 +432,7 @@ def main() -> None:
         "key_factors",
         "expected_lineup",
     ]
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     board[columns].to_csv(args.output, index=False)
 
 
