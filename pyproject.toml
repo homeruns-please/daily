@@ -27,6 +27,7 @@ dev = [
 daily-hr-ingest = "daily_hr.ingest:main"
 daily-hr-build = "daily_hr.dataset:main"
 daily-hr-train = "daily_hr.train:main"
+daily-hr-live-board = "daily_hr.live_calibration:main"
 
 [tool.ruff]
 line-length = 100
