@@ -13,6 +13,7 @@ import requests
 
 from .dataset import build_batter_games
 from .matchups import build_matchup_features
+from .weather import get_weather
 
 MLB_API = "https://statsapi.mlb.com/api/v1"
 
@@ -153,6 +154,8 @@ def _add_matchup_context(board: pd.DataFrame, historical_raw: pd.DataFrame, day:
     """Add a small pitcher-matchup adjustment without letting it dominate skill."""
     if "pitch_type" not in historical_raw.columns or "pitcher" not in historical_raw.columns:
         board["matchup_score"] = 0.5
+        board["baseline_rating"] = (1.0 + 9.0 * board["hr_probability"].rank(pct=True)).round(1)
+        board["matchup_rating"] = 5.5
         board["ranking_score"] = board["hr_probability"].rank(pct=True)
         return board
 
@@ -184,6 +187,72 @@ def _add_matchup_context(board: pd.DataFrame, historical_raw: pd.DataFrame, day:
     return board
 
 
+def _weather_score(weather: dict[str, float | None]) -> float:
+    """Return a conservative 0-1 game-environment score.
+
+    Temperature is directional because extreme cold/heat can affect carry. Wind
+    speed is treated as a modest environmental signal; wind direction is retained
+    for display until park-specific field bearings are added.
+    """
+    temperature = weather.get("temperature_f")
+    wind = weather.get("wind_mph")
+    score = 0.5
+    if temperature is not None:
+        if 70 <= temperature <= 85:
+            score += 0.10
+        elif 60 <= temperature < 70 or 85 < temperature <= 92:
+            score += 0.03
+        elif temperature < 45 or temperature > 100:
+            score -= 0.10
+        else:
+            score -= 0.03
+    if wind is not None:
+        score += min(wind, 15.0) / 15.0 * 0.05
+    return max(0.0, min(1.0, score))
+
+
+def _add_weather_context(board: pd.DataFrame, games: list[dict], day: date) -> pd.DataFrame:
+    """Add a bounded game-time weather adjustment and display fields."""
+    weather_by_game: dict[int, dict[str, float | None]] = {}
+    for game in games:
+        game_pk = int(game.get("gamePk", 0))
+        venue = game.get("venue", {}).get("name")
+        if not game_pk or not venue:
+            continue
+        try:
+            game_time = datetime.fromisoformat(game["gameDate"].replace("Z", "+00:00"))
+            weather_by_game[game_pk] = get_weather(day, venue, game_time)
+        except (KeyError, TypeError, ValueError, requests.RequestException):
+            continue
+
+    if not weather_by_game:
+        board["weather_score"] = 0.5
+        board["weather_rating"] = 5.5
+        board["weather_temperature_f"] = pd.NA
+        board["weather_wind_mph"] = pd.NA
+        board["weather_wind_direction_deg"] = pd.NA
+        return board
+
+    scores: list[float] = []
+    temperatures: list[float | None] = []
+    winds: list[float | None] = []
+    directions: list[float | None] = []
+    for row in board.itertuples(index=False):
+        weather = weather_by_game.get(int(getattr(row, "game_pk", 0)), {})
+        scores.append(_weather_score(weather))
+        temperatures.append(weather.get("temperature_f"))
+        winds.append(weather.get("wind_mph"))
+        directions.append(weather.get("wind_direction_deg"))
+
+    board["weather_score"] = scores
+    board["weather_rating"] = (1.0 + 9.0 * board["weather_score"]).round(1)
+    board["weather_temperature_f"] = temperatures
+    board["weather_wind_mph"] = winds
+    board["weather_wind_direction_deg"] = directions
+    board["ranking_score"] = 0.80 * board["hr_probability"].rank(pct=True) + 0.15 * board["matchup_score"].rank(pct=True).fillna(0.5) + 0.05 * board["weather_score"]
+    return board
+
+
 def _add_signal_breakdown(board: pd.DataFrame) -> pd.DataFrame:
     """Add transparent descriptive signals; these explain inputs, not causal weights."""
     def percentile(series: pd.Series) -> pd.Series:
@@ -205,6 +274,7 @@ def _add_signal_breakdown(board: pd.DataFrame) -> pd.DataFrame:
             "contact_quality_rating": "Hard-hit rate",
             "exit_velocity_rating": "Exit velocity",
             "matchup_rating": "Pitcher matchup",
+            "weather_rating": "Weather",
         }
         values = {key: row.get(key, 5.5) for key in labels}
         top = sorted(values, key=values.get, reverse=True)[:2]
@@ -222,7 +292,8 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
     latest = historical.sort_values(["batter", "game_date", "game_pk"]).groupby("batter").tail(1)
 
     candidates: list[dict] = []
-    for game in _today_games(day):
+    games = _today_games(day)
+    for game in games:
         teams = game.get("teams", {})
         away = teams.get("away", {})
         home = teams.get("home", {})
@@ -233,6 +304,8 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
         home_pitcher_id = home.get("probablePitcher", {}).get("id")
         for row in _lineup(game):
             row["game_time"] = game.get("gameDate", "")
+            row["game_pk"] = game.get("gamePk")
+            row["venue"] = game.get("venue", {}).get("name", "")
             row["opposing_pitcher"] = home_pitcher if row["team"] == away_name else away_pitcher
             row["opposing_pitcher_id"] = home_pitcher_id if row["team"] == away_name else away_pitcher_id
             candidates.append(row)
@@ -247,6 +320,7 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
     X = board[features].replace([float("inf"), float("-inf")], pd.NA).fillna(0)
     board["hr_probability"] = model.predict_proba(X)
     board = _add_matchup_context(board, raw, day)
+    board = _add_weather_context(board, games, day)
     board = _add_signal_breakdown(board)
     board = board.sort_values("ranking_score", ascending=False).reset_index(drop=True)
     board["model_rank"] = board.index + 1
@@ -279,6 +353,10 @@ def main() -> None:
         "rating",
         "baseline_rating",
         "matchup_rating",
+        "weather_rating",
+        "weather_temperature_f",
+        "weather_wind_mph",
+        "weather_wind_direction_deg",
         "recent_power_rating",
         "barrel_rating",
         "contact_quality_rating",
