@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .pipeline import add_prior_game_rolls, normalize_statcast
+from .pipeline import normalize_statcast
 
 
 WINDOWS = (5, 10, 20)
@@ -53,7 +53,7 @@ def build_batter_games(statcast: pd.DataFrame) -> pd.DataFrame:
             "exit_velocity_avg",
         ):
             out[f"{column}_last_{window}"] = grouped_out[column].transform(
-                lambda s: s.shift(1).rolling(window, min_periods=1).mean()
+                lambda s, window=window: s.shift(1).rolling(window, min_periods=1).mean()
             )
 
     out["hr_per_pa_last_20"] = out["home_runs_last_20"].div(
