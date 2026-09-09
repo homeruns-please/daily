@@ -119,6 +119,35 @@ def _lineup(game: dict) -> list[dict]:
     return rows
 
 
+def _rating_label(rating: float) -> str:
+    """Return the public-facing qualitative label for a 1-10 HR rating."""
+    labels = {
+        10: "Elite",
+        9: "Excellent",
+        8: "Strong",
+        7: "Above average",
+        6: "Solid",
+        5: "Neutral",
+        4: "Below average",
+        3: "Weak",
+        2: "Poor",
+        1: "Avoid",
+    }
+    return labels[int(round(rating))]
+
+
+def _assign_ratings(board: pd.DataFrame) -> pd.DataFrame:
+    """Convert internal probabilities into slate-relative public ratings."""
+    n = len(board)
+    if n == 1:
+        board["hr_rating"] = 10.0
+    else:
+        ranks = board["hr_probability"].rank(method="first", ascending=False)
+        board["hr_rating"] = (10.0 - 9.0 * (ranks - 1) / (n - 1)).round(1)
+    board["rating"] = board["hr_rating"].map(_rating_label)
+    return board
+
+
 def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date) -> pd.DataFrame:
     raw = pd.read_csv(raw_csv)
     historical = build_batter_games(raw)
@@ -148,12 +177,13 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
     board = board.merge(latest[["batter", *features]], on="batter", how="left")
     X = board[features].replace([float("inf"), float("-inf")], pd.NA).fillna(0)
     board["hr_probability"] = model.predict_proba(X)
-    board["model_rank"] = board["hr_probability"].rank(method="first", ascending=False).astype(int)
-    return board.sort_values("hr_probability", ascending=False).reset_index(drop=True)
+    board = board.sort_values("hr_probability", ascending=False).reset_index(drop=True)
+    board["model_rank"] = board.index + 1
+    return _assign_ratings(board)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build today's HR probability board")
+    parser = argparse.ArgumentParser(description="Build today's HR rating board")
     parser.add_argument("raw_csv", type=Path)
     parser.add_argument("model", type=Path)
     parser.add_argument("features", type=Path)
@@ -174,7 +204,8 @@ def main() -> None:
         "opponent",
         "opposing_pitcher",
         "lineup_slot",
-        "hr_probability",
+        "hr_rating",
+        "rating",
         "expected_lineup",
     ]
     board[columns].to_csv(args.output, index=False)
