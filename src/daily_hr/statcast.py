@@ -6,7 +6,6 @@ from collections.abc import Iterable
 
 import pandas as pd
 
-
 REQUIRED = {"game_date", "batter", "pitcher", "events"}
 
 
