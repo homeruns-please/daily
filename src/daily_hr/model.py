@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import brier_score_loss, log_loss, roc_auc_score
 
 
@@ -21,11 +21,12 @@ class ModelMetrics:
 @dataclass
 class CalibratedModel:
     model: HistGradientBoostingClassifier
-    calibrator: IsotonicRegression
+    calibrator: LogisticRegression
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        raw = self.model.predict_proba(X)[:, 1]
-        calibrated = self.calibrator.predict(raw)
+        raw = np.clip(self.model.predict_proba(X)[:, 1], 1e-6, 1 - 1e-6)
+        logits = np.log(raw / (1.0 - raw)).reshape(-1, 1)
+        calibrated = self.calibrator.predict_proba(logits)[:, 1]
         return np.clip(calibrated, 1e-6, 1 - 1e-6)
 
 
@@ -48,15 +49,17 @@ def fit_calibrated_model(
     X_cal: pd.DataFrame,
     y_cal: pd.Series,
 ) -> CalibratedModel:
-    """Fit on an earlier time block and calibrate on a later block."""
+    """Fit on an earlier time block and calibrate on a later block.
+
+    Logistic (Platt-style) calibration is deliberately used instead of isotonic
+    regression because HR events are rare; isotonic can create large flat
+    probability steps from a small calibration sample.
+    """
     model = train_baseline(X_train, y_train)
-    raw = model.predict_proba(X_cal)[:, 1]
-    calibrator = IsotonicRegression(
-        y_min=1e-6,
-        y_max=1 - 1e-6,
-        out_of_bounds="clip",
-    )
-    calibrator.fit(raw, y_cal)
+    raw = np.clip(model.predict_proba(X_cal)[:, 1], 1e-6, 1 - 1e-6)
+    logits = np.log(raw / (1.0 - raw)).reshape(-1, 1)
+    calibrator = LogisticRegression(C=1.0, solver="lbfgs", max_iter=1000)
+    calibrator.fit(logits, y_cal)
     return CalibratedModel(model=model, calibrator=calibrator)
 
 
