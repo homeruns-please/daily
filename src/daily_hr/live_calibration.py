@@ -47,8 +47,7 @@ def _hr_hitters(day: date) -> set[int]:
         response.raise_for_status()
         data = response.json().get("liveData", {})
         for play in data.get("plays", {}).get("allPlays", []):
-            result = play.get("result", {})
-            if result.get("eventType") != "home_run":
+            if play.get("result", {}).get("eventType") != "home_run":
                 continue
             batter = play.get("matchup", {}).get("batter", {}).get("id")
             if batter:
@@ -64,13 +63,16 @@ def _percentiles(board: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     return result
 
 
-def apply_live_calibration(board: pd.DataFrame, hr_hitters: set[int]) -> pd.DataFrame:
+def apply_live_calibration(
+    board: pd.DataFrame,
+    hr_hitters: set[int],
+    eligible_game_pks: set[int] | None = None,
+) -> pd.DataFrame:
     """Adjust remaining-slate rankings from the observed same-day HR profile.
 
-    The observed HR hitters are compared with the pregame board on leading power
-    indicators. A small empirical-Bayes shrinkage term prevents one or two early
-    HRs from swinging the entire slate. The adjustment is bounded to +/- 5% of the
-    composite ranking signal and is applied only to players without a recorded HR.
+    Observed HR hitters are compared with the pregame board on leading power
+    indicators. Empirical-Bayes shrinkage prevents a small early sample from
+    swinging the slate, and the final adjustment is bounded to +/- 5%.
     """
     columns = [column for column in LEADING_FEATURES if column in board.columns]
     board["live_hr_count"] = int(len(hr_hitters))
@@ -92,11 +94,12 @@ def apply_live_calibration(board: pd.DataFrame, hr_hitters: set[int]) -> pd.Data
     n = len(observed_pct)
     shrink = n / (n + SHRINKAGE_PRIOR)
     effect = (hr_mean - slate_mean) * shrink
-    effect_strength = effect.abs() * pd.Series(LEADING_FEATURES).reindex(columns)
+    feature_weights = pd.Series(LEADING_FEATURES).reindex(columns)
+    effect_strength = effect.abs() * feature_weights
     if effect_strength.sum() <= 0:
         return board
 
-    weighted_effect = effect * pd.Series(LEADING_FEATURES).reindex(columns)
+    weighted_effect = effect * feature_weights
     effect_total = float(effect_strength.sum())
     feature_signal = (feature_pct.sub(0.5) * weighted_effect).sum(axis=1) / effect_total
     feature_signal = feature_signal.clip(-0.5, 0.5)
@@ -109,8 +112,13 @@ def apply_live_calibration(board: pd.DataFrame, hr_hitters: set[int]) -> pd.Data
         -MAX_LIVE_ADJUSTMENT, MAX_LIVE_ADJUSTMENT
     )
 
+    if eligible_game_pks is None:
+        eligible = pd.Series(True, index=board.index)
+    else:
+        eligible = board["game_pk"].isin(eligible_game_pks)
     already_hit = board["batter"].isin(hr_hitters)
-    adjustment.loc[already_hit] = 0.0
+    adjustment.loc[~eligible | already_hit] = 0.0
+
     board["live_calibration_score"] = (0.5 + live_signal).clip(0.0, 1.0).round(3)
     board["live_calibration_adjustment"] = adjustment.round(4)
     board["live_calibration_confidence"] = (
@@ -127,10 +135,16 @@ def build_live_board(
     features_path: Path,
     day: date,
 ) -> pd.DataFrame:
-    """Build the normal board, then apply the live same-day HR calibration."""
+    """Build the normal board, then apply live same-day HR calibration."""
     board = build_board(raw_csv, model_path, features_path, day)
+    games = _live_games(day)
     hr_hitters = _hr_hitters(day)
-    board = apply_live_calibration(board, hr_hitters)
+    eligible_game_pks = {
+        int(game["gamePk"])
+        for game in games
+        if game.get("status", {}).get("abstractGameState") != "Final" and game.get("gamePk")
+    }
+    board = apply_live_calibration(board, hr_hitters, eligible_game_pks)
     board = board.sort_values("ranking_score", ascending=False).reset_index(drop=True)
     board["model_rank"] = board.index + 1
     if len(board) > 1:
@@ -150,14 +164,15 @@ def main() -> None:
     parser.add_argument("--date", default=datetime.now(UTC).date().isoformat())
     args = parser.parse_args()
     board = build_live_board(
-        Path(args.raw_csv),
-        Path(args.model),
-        Path(args.features),
+        args.raw_csv,
+        args.model,
+        args.features,
         date.fromisoformat(args.date),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     board.to_csv(args.output, index=False)
-    print(board[["model_rank", "batter_name", "hr_rating", "live_hr_count", "live_calibration_adjustment"]].head(25).to_string(index=False))
+    columns = ["model_rank", "batter_name", "hr_rating", "live_hr_count", "live_calibration_adjustment"]
+    print(board[columns].head(25).to_string(index=False))
 
 
 if __name__ == "__main__":
