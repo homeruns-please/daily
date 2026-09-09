@@ -59,6 +59,25 @@ def build_batter_games(statcast: pd.DataFrame) -> pd.DataFrame:
     out["hr_per_pa_last_20"] = out["home_runs_last_20"].div(
         out["plate_appearances_last_20"].replace(0, pd.NA)
     )
+    out["hr_per_pa_last_5"] = out["home_runs_last_5"].div(
+        out["plate_appearances_last_5"].replace(0, pd.NA)
+    )
+
+    # Creative, market-blind momentum/regression signals. These compare recent
+    # contact quality with a player's own longer baseline rather than rewarding
+    # raw home-run totals alone.
+    out["hr_rate_change_5_vs_20"] = out["hr_per_pa_last_5"] - out["hr_per_pa_last_20"]
+    out["barrel_rate_change_5_vs_20"] = (
+        out["barrel_pct_last_5"] - out["barrel_pct_last_20"]
+    )
+    out["hard_hit_rate_change_5_vs_20"] = (
+        out["hard_hit_pct_last_5"] - out["hard_hit_pct_last_20"]
+    )
+    out["exit_velocity_change_5_vs_20"] = (
+        out["exit_velocity_avg_last_5"] - out["exit_velocity_avg_last_20"]
+    )
+    out["fly_ball_change_5_vs_20"] = out["fly_ball_pct_last_5"] - out["fly_ball_pct_last_20"]
+    out["barrel_to_hr_gap_20"] = out["barrel_pct_last_20"] - out["hr_per_pa_last_20"]
     return out
 
 
