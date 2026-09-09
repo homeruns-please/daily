@@ -41,35 +41,66 @@ def _final_hr_hitters(day: date) -> dict[int, set[int]]:
     return result
 
 
+def _truthy(value: object) -> bool:
+    """Parse booleans robustly after a CSV round trip."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y"}
+
+
 def evaluate_snapshot(
     snapshot: pd.DataFrame,
     final_hr_by_game: dict[int, set[int]],
 ) -> dict[str, float | int]:
     """Measure baseline and live rank capture for games still active at snapshot time."""
-    eligible = snapshot[snapshot["live_eligible_game"].astype(bool)].copy()
+    eligible = snapshot[snapshot["live_eligible_game"].map(_truthy)].copy()
     if eligible.empty:
         return {"eligible_players": 0, "actual_hr_hitters": 0}
 
-    actual_hr: set[int] = set()
+    actual_pairs: set[tuple[int, int]] = set()
     for game_pk in eligible["game_pk"].dropna().astype(int).unique():
-        actual_hr.update(final_hr_by_game.get(game_pk, set()))
+        actual_pairs.update((game_pk, batter) for batter in final_hr_by_game.get(game_pk, set()))
 
-    if not actual_hr:
+    if not actual_pairs:
         return {"eligible_players": len(eligible), "actual_hr_hitters": 0}
 
-    actual = eligible[eligible["batter"].isin(actual_hr)].copy()
-    top10_baseline = set(eligible.nsmallest(10, "baseline_model_rank")["batter"])
-    top20_baseline = set(eligible.nsmallest(20, "baseline_model_rank")["batter"])
-    top10_live = set(eligible.nsmallest(10, "model_rank")["batter"])
-    top20_live = set(eligible.nsmallest(20, "model_rank")["batter"])
+    eligible["game_pk"] = eligible["game_pk"].astype(int)
+    eligible["batter"] = eligible["batter"].astype(int)
+    actual = eligible[
+        eligible.apply(lambda row: (row["game_pk"], row["batter"]) in actual_pairs, axis=1)
+    ].copy()
+    top10_baseline = set(
+        zip(
+            eligible.nsmallest(10, "baseline_model_rank")["game_pk"],
+            eligible.nsmallest(10, "baseline_model_rank")["batter"],
+        )
+    )
+    top20_baseline = set(
+        zip(
+            eligible.nsmallest(20, "baseline_model_rank")["game_pk"],
+            eligible.nsmallest(20, "baseline_model_rank")["batter"],
+        )
+    )
+    top10_live = set(
+        zip(
+            eligible.nsmallest(10, "model_rank")["game_pk"],
+            eligible.nsmallest(10, "model_rank")["batter"],
+        )
+    )
+    top20_live = set(
+        zip(
+            eligible.nsmallest(20, "model_rank")["game_pk"],
+            eligible.nsmallest(20, "model_rank")["batter"],
+        )
+    )
 
     return {
         "eligible_players": len(eligible),
         "actual_hr_hitters": len(actual),
-        "baseline_top10_hr": len(actual_hr.intersection(top10_baseline)),
-        "live_top10_hr": len(actual_hr.intersection(top10_live)),
-        "baseline_top20_hr": len(actual_hr.intersection(top20_baseline)),
-        "live_top20_hr": len(actual_hr.intersection(top20_live)),
+        "baseline_top10_hr": len(actual_pairs.intersection(top10_baseline)),
+        "live_top10_hr": len(actual_pairs.intersection(top10_live)),
+        "baseline_top20_hr": len(actual_pairs.intersection(top20_baseline)),
+        "live_top20_hr": len(actual_pairs.intersection(top20_live)),
         "baseline_avg_hr_rank": float(actual["baseline_model_rank"].mean()),
         "live_avg_hr_rank": float(actual["model_rank"].mean()),
         "avg_rank_improvement": float(
