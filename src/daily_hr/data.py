@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
-from io import BytesIO
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,12 +22,14 @@ class DateRange:
 
 def download_statcast(start: date, end: date, destination: Path) -> Path:
     """Download pitch-level Statcast data for an inclusive date range."""
+    if end < start:
+        raise ValueError("end date must be on or after start date")
     destination.parent.mkdir(parents=True, exist_ok=True)
     params = {
         "all": "true",
         "hfGT": "R|",
-        "game_date_gt": start.isoformat(),
-        "game_date_lt": end.isoformat(),
+        "game_date_gt": (start - timedelta(days=1)).isoformat(),
+        "game_date_lt": (end + timedelta(days=1)).isoformat(),
         "group_by": "name",
         "min_pitches": 0,
         "min_results": 0,
