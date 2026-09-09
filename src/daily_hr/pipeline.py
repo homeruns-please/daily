@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import pandas as pd
-
 from collections.abc import Iterable
+
+import pandas as pd
 
 
 REQUIRED = {"game_date", "batter", "events", "launch_speed", "launch_angle", "bb_type"}
