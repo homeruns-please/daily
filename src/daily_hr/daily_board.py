@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import joblib
@@ -26,8 +26,10 @@ def _today_games(day: date) -> list[dict]:
     return [game for block in response.json().get("dates", []) for game in block["games"]]
 
 
-def _lineup(game_pk: int) -> list[dict]:
+def _feed_lineup(game_pk: int) -> list[dict]:
     response = requests.get(f"{MLB_API}/game/{game_pk}/feed/live", timeout=30)
+    if response.status_code == 404:
+        return []
     response.raise_for_status()
     teams = response.json().get("liveData", {}).get("boxscore", {}).get("teams", {})
     rows: list[dict] = []
@@ -45,8 +47,44 @@ def _lineup(game_pk: int) -> list[dict]:
                     "team": team_name,
                     "opponent": opponent,
                     "lineup_slot": slot,
+                    "expected_lineup": False,
                 }
             )
+    return rows
+
+
+def _expected_lineup(team_name: str, day: date) -> list[dict]:
+    """Use the team's most recent announced batting order as an expected lineup."""
+    for days_back in range(1, 8):
+        games = _today_games(day - timedelta(days=days_back))
+        for game in games:
+            teams = game.get("teams", {})
+            for side in ("away", "home"):
+                team = teams.get(side, {}).get("team", {})
+                if team.get("name") != team_name:
+                    continue
+                rows = _feed_lineup(game.get("gamePk", 0))
+                team_rows = [row for row in rows if row["team"] == team_name]
+                if team_rows:
+                    for row in team_rows:
+                        row["expected_lineup"] = True
+                    return team_rows
+    return []
+
+
+def _lineup(game: dict) -> list[dict]:
+    """Prefer today's lineup; otherwise use the most recent expected lineup."""
+    rows = _feed_lineup(game["gamePk"])
+    if rows:
+        return rows
+    teams = game.get("teams", {})
+    rows = []
+    for side in ("away", "home"):
+        team_name = teams.get(side, {}).get("team", {}).get("name", "")
+        opponent = teams.get("home" if side == "away" else "away", {}).get("team", {}).get("name", "")
+        for row in _expected_lineup(team_name, date.fromisoformat(game["gameDate"][:10])):
+            row["opponent"] = opponent
+            rows.append(row)
     return rows
 
 
@@ -65,7 +103,7 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
         away_name = away.get("team", {}).get("name", "")
         away_pitcher = away.get("probablePitcher", {}).get("fullName", "TBD")
         home_pitcher = home.get("probablePitcher", {}).get("fullName", "TBD")
-        for row in _lineup(game["gamePk"]):
+        for row in _lineup(game):
             row["game_time"] = game.get("gameDate", "")
             row["opposing_pitcher"] = home_pitcher if row["team"] == away_name else away_pitcher
             candidates.append(row)
@@ -86,13 +124,9 @@ def main() -> None:
     parser.add_argument("model", type=Path)
     parser.add_argument("features", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument(
-        "--date", default=datetime.now(UTC).date().isoformat()
-    )
+    parser.add_argument("--date", default=datetime.now(UTC).date().isoformat())
     args = parser.parse_args()
-    board = build_board(
-        args.raw_csv, args.model, args.features, date.fromisoformat(args.date)
-    )
+    board = build_board(args.raw_csv, args.model, args.features, date.fromisoformat(args.date))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     columns = [
         "model_rank",
@@ -102,6 +136,7 @@ def main() -> None:
         "opposing_pitcher",
         "lineup_slot",
         "hr_probability",
+        "expected_lineup",
     ]
     board[columns].to_csv(args.output, index=False)
     print(board[columns].head(25).to_string(index=False))
