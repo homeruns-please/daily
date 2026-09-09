@@ -75,7 +75,7 @@ def apply_live_calibration(
     swinging the slate, and the final adjustment is bounded to +/- 5%.
     """
     columns = [column for column in LEADING_FEATURES if column in board.columns]
-    board["live_hr_count"] = int(len(hr_hitters))
+    board["live_hr_count"] = len(hr_hitters)
     board["live_calibration_confidence"] = "None"
     board["live_calibration_score"] = 0.5
     board["live_calibration_adjustment"] = 0.0
