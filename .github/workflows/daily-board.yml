@@ -44,4 +44,5 @@ jobs:
             reports/hr_board.csv
             models/hr_model.joblib
             models/hr_model.features.json
+            data/raw/statcast.csv
           retention-days: 7
