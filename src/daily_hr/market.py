@@ -19,7 +19,7 @@ class MarketQuote:
         return american_to_probability(self.american_odds)
 
 
-def american_to_probability(american_odds: int | float) -> float:
+def american_to_probability(american_odds: float) -> float:
     """Convert American odds to raw implied probability."""
     odds = float(american_odds)
     if odds == 0:
