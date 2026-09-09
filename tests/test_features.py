@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from daily_hr.features import add_rolling_mean
 
@@ -15,5 +16,5 @@ def test_rolling_feature_does_not_use_current_game():
     result = add_rolling_mean(df, ["player_id"], "barrel_pct", windows=(2,))
 
     assert pd.isna(result.iloc[0]["barrel_pct_rolling_2"])
-    assert result.iloc[1]["barrel_pct_rolling_2"] == 0.10
-    assert result.iloc[2]["barrel_pct_rolling_2"] == 0.15
+    assert result.iloc[1]["barrel_pct_rolling_2"] == pytest.approx(0.10)
+    assert result.iloc[2]["barrel_pct_rolling_2"] == pytest.approx(0.15)
