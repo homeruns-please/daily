@@ -1,5 +1,6 @@
 import pandas as pd
 
+from daily_hr.evaluate_live import evaluate_snapshot
 from daily_hr.live_calibration import apply_live_calibration
 
 
@@ -68,3 +69,25 @@ def test_live_snapshot_preserves_pregame_rank_columns() -> None:
     result["baseline_model_rank"] = baseline
     assert result["baseline_model_rank"].tolist() == [1, 2, 3]
     assert result["ranking_score"].tolist() == [0.90, 0.80, result.loc[2, "ranking_score"]]
+
+
+def test_evaluate_snapshot_handles_csv_booleans_and_game_specific_hr() -> None:
+    snapshot = pd.DataFrame(
+        {
+            "batter": [1, 2, 3, 4],
+            "game_pk": [100, 100, 200, 200],
+            "live_eligible_game": ["True", "True", "False", "True"],
+            "baseline_model_rank": [1, 2, 1, 3],
+            "model_rank": [1, 3, 1, 2],
+        }
+    )
+
+    metrics = evaluate_snapshot(snapshot, {100: {2}, 200: {1}})
+
+    assert metrics["eligible_players"] == 3
+    assert metrics["actual_hr_hitters"] == 1
+    assert metrics["baseline_top10_hr"] == 1
+    assert metrics["live_top10_hr"] == 1
+    assert metrics["baseline_avg_hr_rank"] == 2.0
+    assert metrics["live_avg_hr_rank"] == 3.0
+    assert metrics["avg_rank_improvement"] == -1.0
