@@ -220,7 +220,7 @@ def _add_weather_context(board: pd.DataFrame, games: list[dict], day: date) -> p
         if not game_pk or not venue:
             continue
         try:
-            game_time = datetime.fromisoformat(game["gameDate"].replace("Z", "+00:00"))
+            game_time = datetime.fromisoformat(game["gameDate"])
             weather_by_game[game_pk] = get_weather(day, venue, game_time)
         except (KeyError, TypeError, ValueError, requests.RequestException):
             continue
@@ -365,7 +365,6 @@ def main() -> None:
         "expected_lineup",
     ]
     board[columns].to_csv(args.output, index=False)
-    print(board[columns].head(25).to_string(index=False))
 
 
 if __name__ == "__main__":
