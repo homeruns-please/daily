@@ -21,8 +21,9 @@ def add_rolling_mean(
     grouped = out.groupby(group_cols, sort=False)[value_col]
     for window in windows:
         name = f"{value_col}_rolling_{window}"
+        min_periods = min(window, max(1, window // 3))
         out[name] = grouped.transform(
-            lambda s: s.shift(1).rolling(window=window, min_periods=max(3, window // 3)).mean()
+            lambda s: s.shift(1).rolling(window=window, min_periods=min_periods).mean()
         )
     return out
 
