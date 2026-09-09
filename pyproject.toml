@@ -33,5 +33,8 @@ line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["daily_hr"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
