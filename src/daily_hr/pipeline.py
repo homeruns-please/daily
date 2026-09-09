@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-
 import pandas as pd
+
+from collections.abc import Iterable
 
 
 REQUIRED = {"game_date", "batter", "events", "launch_speed", "launch_angle", "bb_type"}
@@ -22,8 +22,6 @@ def normalize_statcast(df: pd.DataFrame) -> pd.DataFrame:
     out["is_hr"] = out["events"].eq("home_run").astype("int8")
     out["is_hard_hit"] = out["launch_speed"].ge(95).astype("int8")
     out["is_fly_ball"] = out["bb_type"].isin(["fly_ball", "line_drive", "popup"]).astype("int8")
-    # Baseball Savant's barrel definition is more nuanced than a single cutoff;
-    # use the native barrel column when available and fall back to HR contact.
     if "barrel" in out.columns:
         out["is_barrel"] = out["barrel"].eq("true").astype("int8")
     else:
@@ -32,11 +30,7 @@ def normalize_statcast(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_batter_game_table(statcast: pd.DataFrame) -> pd.DataFrame:
-    """Create one row per batter/game with only same-game outcome fields.
-
-    Rolling features must be generated after this table is sorted by date and
-    shifted, so today's outcome can never leak into today's predictors.
-    """
+    """Create one row per batter/game with only same-game outcome fields."""
     df = normalize_statcast(statcast)
     group = df.groupby(["game_date", "game_pk", "batter"], dropna=False)
     agg = group.agg(
