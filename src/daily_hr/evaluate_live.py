@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, date
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -41,7 +41,10 @@ def _final_hr_hitters(day: date) -> dict[int, set[int]]:
     return result
 
 
-def evaluate_snapshot(snapshot: pd.DataFrame, final_hr_by_game: dict[int, set[int]]) -> dict[str, float | int]:
+def evaluate_snapshot(
+    snapshot: pd.DataFrame,
+    final_hr_by_game: dict[int, set[int]],
+) -> dict[str, float | int]:
     """Measure baseline and live rank capture for games still active at snapshot time."""
     eligible = snapshot[snapshot["live_eligible_game"].astype(bool)].copy()
     if eligible.empty:
@@ -69,6 +72,9 @@ def evaluate_snapshot(snapshot: pd.DataFrame, final_hr_by_game: dict[int, set[in
         "live_top20_hr": int(len(actual_hr.intersection(top20_live))),
         "baseline_avg_hr_rank": float(actual["baseline_model_rank"].mean()),
         "live_avg_hr_rank": float(actual["model_rank"].mean()),
+        "avg_rank_improvement": float(
+            actual["baseline_model_rank"].mean() - actual["model_rank"].mean()
+        ),
     }
 
 
