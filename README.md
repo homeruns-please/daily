@@ -1,6 +1,6 @@
 # Daily Home Run Prediction Engine
 
-A leakage-safe MLB home-run probability pipeline. The project is designed to turn historical Statcast, schedule, pitcher, lineup, park, and weather data into daily batter-level probabilities for hitting at least one home run.
+A leakage-safe MLB home-run probability pipeline. The project turns historical Statcast, schedule, pitcher, lineup, park, and weather data into daily batter-level probabilities for hitting at least one home run.
 
 ## Design goals
 
@@ -12,11 +12,29 @@ A leakage-safe MLB home-run probability pipeline. The project is designed to tur
 - Calibrate probabilities so a 15% prediction means roughly 15 HRs per 100 comparable opportunities.
 - Keep a simple baseline alongside the production model so model improvements can be measured.
 
-## Planned pipeline
+## Implemented pipeline
 
-`raw data -> normalized tables -> point-in-time features -> training set -> time-series validation -> calibrated model -> daily predictions`
+`raw Statcast -> normalized pitch data -> batter-game table -> prior 5/10/20-game features -> time-based training/calibration/test`
 
-## Initial feature families
+The repository also contains MLB schedule/probable-pitcher ingestion, pitcher Statcast aggregations, pitch-mix calculations, batter-vs-pitch-type matchup features, and a Markdown Daily Home Run Board renderer.
+
+### Build a historical dataset
+
+```bash
+daily-hr-build data/raw/statcast.csv data/processed/hr_training.parquet
+```
+
+The builder creates the HR target (`1+ HR in the game`) and leakage-safe prior-game features including barrel%, hard-hit%, fly-ball%, launch angle, exit velocity, plate-appearance volume, HR totals, and HR/PA over the prior 20 games.
+
+### Train and evaluate
+
+```bash
+daily-hr-train data/processed/hr_training.parquet
+```
+
+Training uses chronological train/calibration/test blocks and evaluates ROC AUC, log loss, and Brier score. The production probability path uses isotonic calibration fitted only on a later time block.
+
+## Feature families
 
 ### Batter
 - Barrel%, Hard-Hit%, fly-ball%, pull%, launch angle, exit velocity
@@ -48,10 +66,10 @@ A leakage-safe MLB home-run probability pipeline. The project is designed to tur
 
 ## Data sources
 
-Baseball Savant Statcast is the primary source for pitch-level contact and pitch characteristics. MLB's schedule/probable-pitcher data supplies game context and starting-pitcher information. Source adapters should remain isolated so providers can be replaced without changing model code.
+Baseball Savant Statcast is the primary source for pitch-level contact and pitch characteristics. MLB's schedule/probable-pitcher data supplies game context and starting-pitcher information. Source adapters remain isolated so providers can be replaced without changing model code.
 
 ## Status
 
-Phase 1: repository scaffold and leakage-safe feature architecture.
+**Working foundation:** ingestion adapters, leakage-safe historical feature construction, chronological calibration, pitch-type matchup engine, reporting, CLI commands, and automated tests are in the repo.
 
-Next: implement data ingestion adapters and build the first historical training dataset.
+**Next production step:** add the point-in-time daily scorer that joins confirmed lineups, probable starters, weather, park context, and pitcher/batter matchup features, then emits the ranked Daily Home Run Board.
