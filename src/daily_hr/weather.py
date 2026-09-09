@@ -60,34 +60,42 @@ def _request(url: str, game_date: date, latitude: float, longitude: float) -> di
     return response.json()
 
 
-def get_weather(game_date: date, venue: str) -> dict[str, float | None]:
-    """Return daily hourly weather series for a ballpark.
-
-    The caller can select the hour closest to first pitch. Historical dates use
-    Open-Meteo's archive endpoint; current/future dates use its forecast API.
-    """
+def get_weather(game_date: date, venue: str, game_time: datetime | None = None) -> dict[str, float | None]:
+    """Return weather at the observation closest to first pitch."""
     if venue not in PARK_COORDS:
         raise ValueError(f"Unknown venue coordinates: {venue}")
     lat, lon = PARK_COORDS[venue]
     url = OPEN_METEO_ARCHIVE if game_date < datetime.now(UTC).date() else OPEN_METEO_FORECAST
     payload = _request(url, game_date, lat, lon)
     hourly = payload.get("hourly", {})
+    times = [datetime.fromisoformat(value).replace(tzinfo=UTC) for value in hourly.get("time", [])]
+    if not times:
+        return {
+            "latitude": lat,
+            "longitude": lon,
+            "temperature_f": None,
+            "wind_mph": None,
+            "wind_direction_deg": None,
+            "relative_humidity": None,
+            "pressure_msl_hpa": None,
+        }
+    target = game_time or times[0]
+    if target.tzinfo is None:
+        target = target.replace(tzinfo=UTC)
+    index = min(range(len(times)), key=lambda i: abs(times[i] - target))
+
+    def value(name: str) -> float | None:
+        values = hourly.get(name, [])
+        item = values[index] if index < len(values) else None
+        return float(item) if item is not None else None
+
+    temperature_c = value("temperature_2m")
     return {
         "latitude": lat,
         "longitude": lon,
-        "temperature_f": float(hourly.get("temperature_2m", [None])[0] * 9 / 5 + 32)
-        if hourly.get("temperature_2m") and hourly["temperature_2m"][0] is not None
-        else None,
-        "wind_mph": float(hourly.get("wind_speed_10m", [None])[0] * 0.621371)
-        if hourly.get("wind_speed_10m") and hourly["wind_speed_10m"][0] is not None
-        else None,
-        "wind_direction_deg": float(hourly.get("wind_direction_10m", [None])[0])
-        if hourly.get("wind_direction_10m") and hourly["wind_direction_10m"][0] is not None
-        else None,
-        "relative_humidity": float(hourly.get("relative_humidity_2m", [None])[0])
-        if hourly.get("relative_humidity_2m") and hourly["relative_humidity_2m"][0] is not None
-        else None,
-        "pressure_msl_hpa": float(hourly.get("pressure_msl", [None])[0])
-        if hourly.get("pressure_msl") and hourly["pressure_msl"][0] is not None
-        else None,
+        "temperature_f": temperature_c * 9 / 5 + 32 if temperature_c is not None else None,
+        "wind_mph": (value("wind_speed_10m") or 0.0) * 0.621371 if value("wind_speed_10m") is not None else None,
+        "wind_direction_deg": value("wind_direction_10m"),
+        "relative_humidity": value("relative_humidity_2m"),
+        "pressure_msl_hpa": value("pressure_msl"),
     }
