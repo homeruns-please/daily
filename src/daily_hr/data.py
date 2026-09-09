@@ -9,6 +9,8 @@ from typing import Any
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 STATCAST_URL = "https://baseballsavant.mlb.com/statcast_search/csv"
 MLB_API_URL = "https://statsapi.mlb.com/api/v1"
@@ -36,7 +38,19 @@ def download_statcast(start: date, end: date, destination: Path) -> Path:
         "player_type": "batter",
         "type": "details",
     }
-    response = requests.get(STATCAST_URL, params=params, timeout=180)
+    session = requests.Session()
+    retry = Retry(
+        total=5,
+        connect=5,
+        read=5,
+        status=5,
+        backoff_factor=2,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET"}),
+        respect_retry_after_header=True,
+    )
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    response = session.get(STATCAST_URL, params=params, timeout=180)
     response.raise_for_status()
     output = destination.with_suffix(".csv")
     output.write_bytes(response.content)
