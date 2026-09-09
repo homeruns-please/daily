@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
+import joblib
 import pandas as pd
 
 from .model import evaluate, fit_calibrated_model
@@ -34,9 +36,16 @@ def train_file(path: Path, date_column: str = "game_date", target_column: str = 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the daily HR model with time-based validation")
     parser.add_argument("parquet", type=Path)
+    parser.add_argument("--model-out", type=Path, default=Path("models/hr_model.joblib"))
     args = parser.parse_args()
-    _, metrics, features = train_file(args.parquet)
+    fitted, metrics, features = train_file(args.parquet)
+
+    args.model_out.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(fitted, args.model_out)
+    args.model_out.with_suffix(".features.json").write_text(json.dumps(features, indent=2) + "\n")
+
     print(f"features={len(features)}")
+    print(f"model={args.model_out}")
     print(f"test_roc_auc={metrics.roc_auc:.4f}")
     print(f"test_log_loss={metrics.log_loss:.4f}")
     print(f"test_brier={metrics.brier:.4f}")
