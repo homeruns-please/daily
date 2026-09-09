@@ -2,7 +2,7 @@ name: live-hr-board
 
 on:
   schedule:
-    - cron: "17,47 15-23 * * *"
+    - cron: "17,47 0-5,16-23 * * *"
   workflow_dispatch:
 
 permissions:
