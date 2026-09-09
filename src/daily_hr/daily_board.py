@@ -134,7 +134,7 @@ def _rating_label(rating: float) -> str:
         2: "Poor",
         1: "Avoid",
     }
-    return labels[int(round(rating))]
+    return labels[round(rating)]
 
 
 def _assign_ratings(board: pd.DataFrame) -> pd.DataFrame:
