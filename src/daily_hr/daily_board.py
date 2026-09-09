@@ -19,17 +19,46 @@ MLB_API = "https://statsapi.mlb.com/api/v1"
 def _today_games(day: date) -> list[dict]:
     response = requests.get(
         f"{MLB_API}/schedule",
-        params={"sportId": 1, "date": day.isoformat(), "hydrate": "probablePitcher"},
+        params={
+            "sportId": 1,
+            "date": day.isoformat(),
+            "hydrate": "probablePitcher,lineups",
+        },
         timeout=30,
     )
     response.raise_for_status()
     return [game for block in response.json().get("dates", []) for game in block["games"]]
 
 
+def _schedule_lineup(game: dict) -> list[dict]:
+    """Read announced lineups directly from the schedule hydration."""
+    lineups = game.get("lineups", {})
+    if not isinstance(lineups, dict):
+        return []
+    rows: list[dict] = []
+    teams = game.get("teams", {})
+    for side in ("away", "home"):
+        team_name = teams.get(side, {}).get("team", {}).get("name", "")
+        opponent = teams.get("home" if side == "away" else "away", {}).get("team", {}).get("name", "")
+        players = lineups.get(f"{side}Players", [])
+        for slot, player in enumerate(players, start=1):
+            if not isinstance(player, dict) or not player.get("id"):
+                continue
+            rows.append(
+                {
+                    "batter": int(player["id"]),
+                    "batter_name": player.get("fullName", f"Player {player['id']}"),
+                    "team": team_name,
+                    "opponent": opponent,
+                    "lineup_slot": slot,
+                    "expected_lineup": False,
+                }
+            )
+    return rows
+
+
 def _feed_lineup(game_pk: int) -> list[dict]:
     response = requests.get(f"{MLB_API}/game/{game_pk}/feed/live", timeout=30)
-    # Pregame game feeds can legitimately be unavailable. Treat that as
-    # "lineup not confirmed" so the expected-lineup fallback can run.
     if response.status_code == 404:
         return []
     response.raise_for_status()
@@ -65,7 +94,7 @@ def _expected_lineup(team_name: str, day: date) -> list[dict]:
                 team = teams.get(side, {}).get("team", {})
                 if team.get("name") != team_name:
                     continue
-                rows = _feed_lineup(game.get("gamePk", 0))
+                rows = _schedule_lineup(game) or _feed_lineup(game.get("gamePk", 0))
                 team_rows = [row for row in rows if row["team"] == team_name]
                 if team_rows:
                     for row in team_rows:
@@ -75,8 +104,8 @@ def _expected_lineup(team_name: str, day: date) -> list[dict]:
 
 
 def _lineup(game: dict) -> list[dict]:
-    """Prefer today's lineup; otherwise use the most recent expected lineup."""
-    rows = _feed_lineup(game["gamePk"])
+    """Prefer schedule-hydrated/live lineups; otherwise use the recent expected lineup."""
+    rows = _schedule_lineup(game) or _feed_lineup(game["gamePk"])
     if rows:
         return rows
     teams = game.get("teams", {})
@@ -112,7 +141,10 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
 
     board = pd.DataFrame(candidates)
     if board.empty:
-        return board
+        raise RuntimeError(
+            f"No lineup candidates were returned for {day.isoformat()}; "
+            "MLB schedule/live lineup data is unavailable."
+        )
     board = board.merge(latest[["batter", *features]], on="batter", how="left")
     X = board[features].replace([float("inf"), float("-inf")], pd.NA).fillna(0)
     board["hr_probability"] = model.predict_proba(X)
@@ -128,7 +160,12 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     parser.add_argument("--date", default=datetime.now(UTC).date().isoformat())
     args = parser.parse_args()
-    board = build_board(raw_csv=args.raw_csv, model_path=args.model, features_path=args.features, day=date.fromisoformat(args.date))
+    board = build_board(
+        raw_csv=args.raw_csv,
+        model_path=args.model,
+        features_path=args.features,
+        day=date.fromisoformat(args.date),
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     columns = [
         "model_rank",
