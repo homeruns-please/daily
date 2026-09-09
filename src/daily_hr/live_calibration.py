@@ -137,6 +137,10 @@ def build_live_board(
 ) -> pd.DataFrame:
     """Build the normal board, then apply live same-day HR calibration."""
     board = build_board(raw_csv, model_path, features_path, day)
+    board["baseline_ranking_score"] = board["ranking_score"]
+    board["baseline_model_rank"] = (
+        board["baseline_ranking_score"].rank(method="first", ascending=False).astype(int)
+    )
     games = _live_games(day)
     hr_hitters = _hr_hitters(day)
     eligible_game_pks = {
@@ -151,6 +155,8 @@ def build_live_board(
     if len(board) > 1:
         ranks = board["ranking_score"].rank(method="first", ascending=False)
         board["hr_rating"] = (10.0 - 9.0 * (ranks - 1) / (len(board) - 1)).round(1)
+    board["snapshot_at_utc"] = datetime.now(UTC).isoformat()
+    board["live_eligible_game"] = board["game_pk"].isin(eligible_game_pks)
     return board
 
 
