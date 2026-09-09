@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import joblib
@@ -63,7 +63,6 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
         away = teams.get("away", {})
         home = teams.get("home", {})
         away_name = away.get("team", {}).get("name", "")
-        home_name = home.get("team", {}).get("name", "")
         away_pitcher = away.get("probablePitcher", {}).get("fullName", "TBD")
         home_pitcher = home.get("probablePitcher", {}).get("fullName", "TBD")
         for row in _lineup(game["gamePk"]):
@@ -87,7 +86,9 @@ def main() -> None:
     parser.add_argument("model", type=Path)
     parser.add_argument("features", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--date", default=date.today().isoformat())
+    parser.add_argument(
+        "--date", default=datetime.now(timezone.utc).date().isoformat()
+    )
     args = parser.parse_args()
     board = build_board(
         args.raw_csv, args.model, args.features, date.fromisoformat(args.date)
