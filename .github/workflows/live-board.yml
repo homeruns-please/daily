@@ -38,8 +38,15 @@ jobs:
             live-artifact/models/hr_model.features.json \
             reports/hr_live_board.csv \
             --date "$TODAY"
+      - name: Save timestamped live snapshot
+        run: |
+          mkdir -p "reports/live_snapshots/${TODAY}"
+          cp reports/hr_live_board.csv \
+            "reports/live_snapshots/${TODAY}/snapshot-${GITHUB_RUN_ID}.csv"
       - uses: actions/upload-artifact@v4
         with:
-          name: live-hr-board-${{ env.TODAY }}
-          path: reports/hr_live_board.csv
-          retention-days: 2
+          name: live-hr-board-${{ env.TODAY }}-${{ github.run_id }}
+          path: |
+            reports/hr_live_board.csv
+            reports/live_snapshots/${{ env.TODAY }}/snapshot-${{ github.run_id }}.csv
+          retention-days: 14
