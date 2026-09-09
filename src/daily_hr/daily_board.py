@@ -28,6 +28,8 @@ def _today_games(day: date) -> list[dict]:
 
 def _feed_lineup(game_pk: int) -> list[dict]:
     response = requests.get(f"{MLB_API}/game/{game_pk}/feed/live", timeout=30)
+    # Pregame game feeds can legitimately be unavailable. Treat that as
+    # "lineup not confirmed" so the expected-lineup fallback can run.
     if response.status_code == 404:
         return []
     response.raise_for_status()
@@ -126,7 +128,7 @@ def main() -> None:
     parser.add_argument("output", type=Path)
     parser.add_argument("--date", default=datetime.now(UTC).date().isoformat())
     args = parser.parse_args()
-    board = build_board(args.raw_csv, args.model, args.features, date.fromisoformat(args.date))
+    board = build_board(raw_csv=args.raw_csv, model_path=args.model, features_path=args.features, day=date.fromisoformat(args.date))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     columns = [
         "model_rank",
