@@ -35,7 +35,6 @@ src = ["src", "tests"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["daily_hr"]
-lines-after-imports = 1
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
