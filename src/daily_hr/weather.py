@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 import requests
@@ -69,11 +69,7 @@ def get_weather(game_date: date, venue: str) -> dict[str, float | None]:
     if venue not in PARK_COORDS:
         raise ValueError(f"Unknown venue coordinates: {venue}")
     lat, lon = PARK_COORDS[venue]
-    url = (
-        OPEN_METEO_ARCHIVE
-        if game_date < datetime.now(timezone.utc).date()
-        else OPEN_METEO_FORECAST
-    )
+    url = OPEN_METEO_ARCHIVE if game_date < datetime.now(UTC).date() else OPEN_METEO_FORECAST
     payload = _request(url, game_date, lat, lon)
     hourly = payload.get("hourly", {})
     return {
