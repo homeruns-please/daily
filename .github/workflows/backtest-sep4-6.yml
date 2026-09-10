@@ -21,7 +21,7 @@ jobs:
       - run: pip install -e .
       - name: Download Statcast history
         run: |
-          daily-hr-ingest "2026-09-04" "2026-09-06" data/raw/statcast.csv --chunk-days 7
+          daily-hr-ingest "2026-06-01" "2026-09-06" data/raw/statcast.csv --chunk-days 7
       - name: Run walk-forward backtest
         run: |
           python -m daily_hr.backtest \
