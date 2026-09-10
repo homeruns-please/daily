@@ -1,0 +1,72 @@
+name: historical-sep4-6-board
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  MLB_TIMEZONE: America/New_York
+  START: 2026-06-01
+
+jobs:
+  board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e .
+
+      - name: Build Sep 4 board from pre-Sep 4 data
+        run: |
+          daily-hr-ingest "$START" "2026-09-03" data/raw/statcast.csv --chunk-days 7
+          daily-hr-build data/raw/statcast.csv data/processed/hr_training.parquet
+          daily-hr-train data/processed/hr_training.parquet --model-out models/hr_model.joblib
+          python -m daily_hr.daily_board data/raw/statcast.csv models/hr_model.joblib models/hr_model.features.json reports/hr_board.csv --date "2026-09-04"
+          python -m daily_hr.production_scorer reports/hr_board.csv reports/sep4_model_board.csv
+          python -m daily_hr.v2_scorer reports/hr_board.csv reports/sep4_model_board_v2.csv
+
+      - name: Build Sep 5 board from pre-Sep 5 data
+        run: |
+          rm -f data/raw/statcast.csv data/processed/hr_training.parquet models/hr_model.joblib models/hr_model.features.json reports/hr_board.csv
+          daily-hr-ingest "$START" "2026-09-04" data/raw/statcast.csv --chunk-days 7
+          daily-hr-build data/raw/statcast.csv data/processed/hr_training.parquet
+          daily-hr-train data/processed/hr_training.parquet --model-out models/hr_model.joblib
+          python -m daily_hr.daily_board data/raw/statcast.csv models/hr_model.joblib models/hr_model.features.json reports/hr_board.csv --date "2026-09-05"
+          python -m daily_hr.production_scorer reports/hr_board.csv reports/sep5_model_board.csv
+          python -m daily_hr.v2_scorer reports/hr_board.csv reports/sep5_model_board_v2.csv
+
+      - name: Build Sep 6 board from pre-Sep 6 data
+        run: |
+          rm -f data/raw/statcast.csv data/processed/hr_training.parquet models/hr_model.joblib models/hr_model.features.json reports/hr_board.csv
+          daily-hr-ingest "$START" "2026-09-05" data/raw/statcast.csv --chunk-days 7
+          daily-hr-build data/raw/statcast.csv data/processed/hr_training.parquet
+          daily-hr-train data/processed/hr_training.parquet --model-out models/hr_model.joblib
+          python -m daily_hr.daily_board data/raw/statcast.csv models/hr_model.joblib models/hr_model.features.json reports/hr_board.csv --date "2026-09-06"
+          python -m daily_hr.production_scorer reports/hr_board.csv reports/sep6_model_board.csv
+          python -m daily_hr.v2_scorer reports/hr_board.csv reports/sep6_model_board_v2.csv
+
+      - name: Commit boards to branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/sep4_model_board.csv reports/sep4_model_board_v2.csv reports/sep5_model_board.csv reports/sep5_model_board_v2.csv reports/sep6_model_board.csv reports/sep6_model_board_v2.csv
+          git commit -m "Publish Sep 4-6 V1 and V2 model boards"
+          git push
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sep4-6-model-boards
+          path: |
+            reports/sep4_model_board.csv
+            reports/sep4_model_board_v2.csv
+            reports/sep5_model_board.csv
+            reports/sep5_model_board_v2.csv
+            reports/sep6_model_board.csv
+            reports/sep6_model_board_v2.csv
+          retention-days: 14
