@@ -15,6 +15,8 @@ jobs:
   board:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -40,6 +42,13 @@ jobs:
         run: python -c "from pathlib import Path; from daily_hr.production_scorer import rerank_csv; rerank_csv(Path('reports/hr_board.csv'), Path('reports/hr_board.csv'))"
       - name: Publish Sep 7 board
         run: cp reports/hr_board.csv reports/sep7_model_board.csv
+      - name: Commit board to branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/sep7_model_board.csv
+          git commit -m "Publish Sep 7 model board" || true
+          git push
       - uses: actions/upload-artifact@v4
         with:
           name: sep7-model-board
