@@ -1,0 +1,9 @@
+weight_set,days,slate_hr_rate,top5_lift,top10_lift,top20_lift,top50_lift,top100_lift,top5_hr,top10_hr,top20_hr,top50_hr,top100_hr
+baseline_50_matchup_25_park_15_weather_10,3,0.0,,,,,,0,0,0,0,0
+baseline_60_matchup_25_park_10_weather_5,3,0.0,,,,,,0,0,0,0,0
+baseline_65_matchup_20_park_10_weather_5,3,0.0,,,,,,0,0,0,0,0
+baseline_75_matchup_15_park_10,3,0.0,,,,,,0,0,0,0,0
+baseline_80_matchup_15_weather_5,3,0.0,,,,,,0,0,0,0,0
+baseline_only,3,0.0,,,,,,0,0,0,0,0
+model_probability_control,3,0.0,,,,,,0,0,0,0,0
+production_current,3,0.0,,,,,,0,0,0,0,0
