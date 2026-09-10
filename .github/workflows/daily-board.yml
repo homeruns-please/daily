@@ -7,6 +7,9 @@ on:
     - cron: "0 16 * * *"
   workflow_dispatch:
 
+env:
+  MLB_TIMEZONE: America/New_York
+
 jobs:
   board:
     runs-on: ubuntu-latest
@@ -21,8 +24,8 @@ jobs:
       - name: Set dates
         run: |
           echo "START=2026-06-01" >> "$GITHUB_ENV"
-          echo "END=$(date -u -d 'yesterday' +%F)" >> "$GITHUB_ENV"
-          echo "TODAY=$(date -u +%F)" >> "$GITHUB_ENV"
+          echo "END=$(TZ="$MLB_TIMEZONE" date -d 'yesterday' +%F)" >> "$GITHUB_ENV"
+          echo "TODAY=$(TZ="$MLB_TIMEZONE" date +%F)" >> "$GITHUB_ENV"
       - name: Download recent Statcast
         run: daily-hr-ingest "$START" "$END" data/raw/statcast.csv --chunk-days 7
       - name: Build training table
