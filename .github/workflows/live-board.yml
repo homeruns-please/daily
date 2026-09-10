@@ -8,6 +8,9 @@ on:
 permissions:
   actions: read
 
+env:
+  MLB_TIMEZONE: America/New_York
+
 jobs:
   live-board:
     runs-on: ubuntu-latest
@@ -19,8 +22,8 @@ jobs:
           python-version: "3.11"
       - run: python -m pip install --upgrade pip
       - run: pip install -e .
-      - name: Set date
-        run: echo "TODAY=$(date -u +%F)" >> "$GITHUB_ENV"
+      - name: Set MLB date
+        run: echo "TODAY=$(TZ="$MLB_TIMEZONE" date +%F)" >> "$GITHUB_ENV"
       - name: Download today's model package
         env:
           GH_TOKEN: ${{ github.token }}
