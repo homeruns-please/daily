@@ -1,0 +1,47 @@
+name: historical-sep7-board
+
+on:
+  push:
+    branches: [historical-sep7]
+  workflow_dispatch:
+
+env:
+  MLB_TIMEZONE: America/New_York
+  START: 2026-06-01
+  END: 2026-09-06
+  TODAY: 2026-09-07
+
+jobs:
+  board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e .
+      - name: Download historical Statcast
+        run: daily-hr-ingest "$START" "$END" data/raw/statcast.csv --chunk-days 7
+      - name: Build training table
+        run: daily-hr-build data/raw/statcast.csv data/processed/hr_training.parquet
+      - name: Train calibrated model
+        run: daily-hr-train data/processed/hr_training.parquet --model-out models/hr_model.joblib
+      - name: Build Sep 7 board
+        run: |
+          python -m daily_hr.daily_board \
+            data/raw/statcast.csv \
+            models/hr_model.joblib \
+            models/hr_model.features.json \
+            reports/hr_board.csv \
+            --date "$TODAY"
+      - name: Apply production scorer
+        run: python -c "from pathlib import Path; from daily_hr.production_scorer import rerank_csv; rerank_csv(Path('reports/hr_board.csv'), Path('reports/hr_board.csv'))"
+      - name: Publish Sep 7 board
+        run: cp reports/hr_board.csv reports/sep7_model_board.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sep7-model-board
+          path: reports/sep7_model_board.csv
+          retention-days: 7
