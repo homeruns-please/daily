@@ -4,6 +4,8 @@ on:
   push:
     paths:
       - ".github/workflows/backtest-sep4-6.yml"
+      - "src/daily_hr/backtest.py"
+      - "src/daily_hr/v2_scorer.py"
 
 permissions:
   contents: write
