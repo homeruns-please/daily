@@ -3,7 +3,7 @@ name: mock-sep8-board
 on:
   push:
     branches:
-      - mock-sep8-board
+      - main
 
 jobs:
   board:
