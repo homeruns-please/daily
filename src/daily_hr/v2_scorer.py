@@ -13,12 +13,10 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
 
 
-# V2 experimental weights. These intentionally differ from V1.
 WEIGHTS_V2 = {
     "baseline": 0.25,
     "pitcher_vulnerability": 0.275,
@@ -47,7 +45,6 @@ def _lineup_rating(value: object) -> float:
         return 0.5
     if math.isnan(slot):
         return 0.5
-    # 1st is best; slots 1-9 are mapped to 1.0-0.2.
     return max(0.0, min(1.0, (10.0 - slot) / 9.0))
 
 
@@ -93,7 +90,9 @@ def score_frame(df: pd.DataFrame) -> pd.DataFrame:
         + WEIGHTS_V2["lineup"] * out["v2_lineup_component"]
     )
 
-    return out.sort_values(["v2_score", "player"], ascending=[False, True]).reset_index(drop=True)
+    # The board schema calls the player-name field batter_name (not player).
+    sort_name = "batter_name" if "batter_name" in out.columns else "player"
+    return out.sort_values(["v2_score", sort_name], ascending=[False, True]).reset_index(drop=True)
 
 
 def rerank_csv(input_path: str | Path, output_path: str | Path) -> None:
