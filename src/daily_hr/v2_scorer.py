@@ -93,7 +93,13 @@ def score_frame(df: pd.DataFrame) -> pd.DataFrame:
         + WEIGHTS_V2["lineup"] * out["v2_lineup_component"]
     )
 
-    return out.sort_values(["v2_score", "player"], ascending=[False, True]).reset_index(drop=True)
+    sort_name = "batter_name" if "batter_name" in out.columns else "player"
+    out = out.sort_values(["v2_score", sort_name], ascending=[False, True]).reset_index(drop=True)
+    if "model_rank" in out.columns:
+        out["input_model_rank"] = out["model_rank"]
+    out["model_rank"] = out.index + 1
+    out["v2_rank"] = out["model_rank"]
+    return out
 
 
 def rerank_csv(input_path: str | Path, output_path: str | Path) -> None:
