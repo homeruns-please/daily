@@ -1,6 +1,8 @@
 name: historical-sep4-6-board
 
 on:
+  push:
+    branches: [historical-sep4-6]
   workflow_dispatch:
 
 permissions:
@@ -56,7 +58,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add reports/sep4_model_board.csv reports/sep4_model_board_v2.csv reports/sep5_model_board.csv reports/sep5_model_board_v2.csv reports/sep6_model_board.csv reports/sep6_model_board_v2.csv
-          git commit -m "Publish Sep 4-6 V1 and V2 model boards"
+          git commit -m "Publish Sep 4-6 V1 and V2 model boards" || true
           git push
 
       - uses: actions/upload-artifact@v4
