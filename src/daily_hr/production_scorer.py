@@ -37,6 +37,12 @@ def _unit_rating(series: pd.Series) -> pd.Series:
     return ((pd.to_numeric(series, errors="coerce") - 1.0) / 9.0).clip(0.0, 1.0).fillna(0.5)
 
 
+def _column_or_fallback(board: pd.DataFrame, column: str, fallback: float) -> pd.Series:
+    if column in board:
+        return board[column]
+    return pd.Series(fallback, index=board.index, dtype=float)
+
+
 def score_board(board: pd.DataFrame) -> pd.DataFrame:
     """Apply the production ranking to an already-built daily board."""
     required = {
@@ -56,11 +62,13 @@ def score_board(board: pd.DataFrame) -> pd.DataFrame:
     board = board.copy()
     baseline = _unit_rating(board["baseline_rating"])
     pitcher = _unit_rating(
-        board.get("pitcher_vulnerability_rating", board.get("matchup_rating", 5.5))
+        _column_or_fallback(
+            board,
+            "pitcher_vulnerability_rating",
+            float(board.get("matchup_rating", pd.Series(5.5, index=board.index)).mean()),
+        )
     )
-    matchup = _unit_rating(
-        board.get("pitch_matchup_edge_rating", board.get("matchup_rating", 5.5))
-    )
+    matchup = _unit_rating(_column_or_fallback(board, "pitch_matchup_edge_rating", 5.5))
     power = pd.concat(
         [
             _unit_rating(board["recent_power_rating"]),
