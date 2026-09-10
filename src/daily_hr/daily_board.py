@@ -185,20 +185,25 @@ def _assign_ratings(board: pd.DataFrame) -> pd.DataFrame:
 
 
 def _add_matchup_context(board: pd.DataFrame, historical_raw: pd.DataFrame, day: date) -> pd.DataFrame:
-    """Add a small pitcher-matchup adjustment without letting it dominate skill."""
+    """Add separate batter-edge and pitcher-vulnerability matchup signals."""
     if "pitch_type" not in historical_raw.columns or "pitcher" not in historical_raw.columns:
         board["matchup_score"] = 0.5
+        board["pitch_matchup_hr_rate"] = float("nan")
+        board["pitch_matchup_pitcher_hr_allowed_rate"] = float("nan")
         board["baseline_rating"] = (1.0 + 9.0 * board["hr_probability"].rank(pct=True)).round(1)
         board["matchup_rating"] = 5.5
-        board["ranking_score"] = board["hr_probability"].rank(pct=True)
         return board
 
     before = pd.Timestamp(day)
-    scores: list[float] = []
+    batter_edges: list[float] = []
+    pitcher_vulnerability: list[float] = []
+    combined: list[float] = []
     for row in board.itertuples(index=False):
         pitcher_id = getattr(row, "opposing_pitcher_id", None)
         if pd.isna(pitcher_id) or pitcher_id in (None, ""):
-            scores.append(float("nan"))
+            batter_edges.append(float("nan"))
+            pitcher_vulnerability.append(float("nan"))
+            combined.append(float("nan"))
             continue
         try:
             matchup = build_matchup_features(
@@ -208,16 +213,22 @@ def _add_matchup_context(board: pd.DataFrame, historical_raw: pd.DataFrame, day:
                 before,
             )
         except (KeyError, TypeError, ValueError):
-            scores.append(float("nan"))
+            batter_edges.append(float("nan"))
+            pitcher_vulnerability.append(float("nan"))
+            combined.append(float("nan"))
             continue
-        scores.append(matchup.get("pitch_matchup_combined_risk", float("nan")))
+        batter_edges.append(matchup.get("pitch_matchup_hr_rate", float("nan")))
+        pitcher_vulnerability.append(matchup.get("pitch_matchup_pitcher_hr_allowed_rate", float("nan")))
+        combined.append(matchup.get("pitch_matchup_combined_risk", float("nan")))
 
-    board["matchup_score"] = pd.to_numeric(scores, errors="coerce")
+    board["pitch_matchup_hr_rate"] = pd.to_numeric(batter_edges, errors="coerce")
+    board["pitch_matchup_pitcher_hr_allowed_rate"] = pd.to_numeric(pitcher_vulnerability, errors="coerce")
+    board["matchup_score"] = pd.to_numeric(combined, errors="coerce")
     baseline_rank = board["hr_probability"].rank(pct=True)
-    matchup_rank = board["matchup_score"].rank(pct=True).fillna(0.5)
     board["baseline_rating"] = (1.0 + 9.0 * baseline_rank).round(1)
-    board["matchup_rating"] = (1.0 + 9.0 * matchup_rank).round(1)
-    board["ranking_score"] = 0.85 * baseline_rank + 0.15 * matchup_rank
+    board["matchup_rating"] = (
+        1.0 + 9.0 * board["pitch_matchup_hr_rate"].rank(pct=True).fillna(0.5)
+    ).round(1)
     return board
 
 
@@ -226,32 +237,19 @@ def _park_score(venue: str) -> float:
     factor = PARK_HR_FACTORS.get(venue)
     if factor is None:
         return 0.5
-    # Compress the extremes while preserving the direction of the park effect.
     return max(0.0, min(1.0, 0.5 + (factor - 100.0) / 200.0))
 
 
 def _add_park_context(board: pd.DataFrame) -> pd.DataFrame:
-    """Add ballpark HR context before weather is applied."""
+    """Add ballpark HR context."""
     board["park_hr_factor"] = board["venue"].map(PARK_HR_FACTORS).fillna(100.0)
     board["park_score"] = board["venue"].map(_park_score)
     board["park_rating"] = (1.0 + 9.0 * board["park_score"]).round(1)
-    baseline_rank = board["hr_probability"].rank(pct=True)
-    matchup_rank = board["matchup_score"].rank(pct=True).fillna(0.5)
-    board["ranking_score"] = (
-        0.70 * baseline_rank
-        + 0.15 * matchup_rank
-        + 0.10 * board["park_score"]
-    )
     return board
 
 
 def _weather_score(weather: dict[str, float | None]) -> float:
-    """Return a conservative 0-1 game-environment score.
-
-    Temperature is directional because extreme cold/heat can affect carry. Wind
-    speed is treated as a modest environmental signal; wind direction is retained
-    for display until park-specific field bearings are added.
-    """
+    """Return a conservative 0-1 game-environment score."""
     temperature = weather.get("temperature_f")
     wind = weather.get("wind_mph")
     score = 0.5
@@ -307,17 +305,11 @@ def _add_weather_context(board: pd.DataFrame, games: list[dict], day: date) -> p
     board["weather_temperature_f"] = temperatures
     board["weather_wind_mph"] = winds
     board["weather_wind_direction_deg"] = directions
-    board["ranking_score"] = (
-        0.70 * board["hr_probability"].rank(pct=True)
-        + 0.15 * board["matchup_score"].rank(pct=True).fillna(0.5)
-        + 0.10 * board["park_score"]
-        + 0.05 * board["weather_score"]
-    )
     return board
 
 
 def _add_signal_breakdown(board: pd.DataFrame) -> pd.DataFrame:
-    """Add transparent descriptive signals; these explain inputs, not causal weights."""
+    """Add transparent descriptive signals and the production ranking components."""
     def percentile(series: pd.Series) -> pd.Series:
         return series.rank(pct=True).fillna(0.5)
 
@@ -330,15 +322,37 @@ def _add_signal_breakdown(board: pd.DataFrame) -> pd.DataFrame:
     for name, values in components.items():
         board[name] = (1.0 + 9.0 * values).round(1)
 
+    baseline_rank = percentile(board["hr_probability"])
+    pitcher_rank = percentile(board["pitch_matchup_pitcher_hr_allowed_rate"])
+    batter_matchup_rank = percentile(board["pitch_matchup_hr_rate"])
+    park_rank = percentile(board["park_score"])
+    weather_rank = percentile(board["weather_score"])
+    recent_rank = percentile(board["hr_per_pa_last_5"])
+    lineup_rank = (10.0 - pd.to_numeric(board["lineup_slot"], errors="coerce").fillna(5.0)) / 9.0
+    lineup_rank = lineup_rank.clip(0.0, 1.0)
+
+    board["pitcher_vulnerability_rating"] = (1.0 + 9.0 * pitcher_rank).round(1)
+    board["pitch_matchup_edge_rating"] = (1.0 + 9.0 * batter_matchup_rank).round(1)
+    board["lineup_context_rating"] = (1.0 + 9.0 * lineup_rank).round(1)
+    board["ranking_score"] = (
+        0.35 * baseline_rank
+        + 0.25 * pitcher_rank
+        + 0.15 * batter_matchup_rank
+        + 0.10 * park_rank
+        + 0.05 * weather_rank
+        + 0.05 * recent_rank
+        + 0.05 * lineup_rank
+    )
+
     def factor(row: pd.Series) -> str:
         labels = {
-            "recent_power_rating": "Recent power",
-            "barrel_rating": "Barrel rate",
-            "contact_quality_rating": "Hard-hit rate",
-            "exit_velocity_rating": "Exit velocity",
-            "matchup_rating": "Pitcher matchup",
+            "baseline_rating": "Hitter skill",
+            "pitcher_vulnerability_rating": "Pitcher vulnerability",
+            "pitch_matchup_edge_rating": "Pitch-type matchup",
             "park_rating": "Ballpark",
             "weather_rating": "Weather",
+            "recent_power_rating": "Recent power",
+            "lineup_context_rating": "Lineup context",
         }
         values = {key: row.get(key, 5.5) for key in labels}
         top = sorted(values, key=values.get, reverse=True)[:2]
@@ -420,8 +434,11 @@ def main() -> None:
         "rating",
         "baseline_rating",
         "matchup_rating",
+        "pitcher_vulnerability_rating",
+        "pitch_matchup_edge_rating",
         "park_rating",
         "weather_rating",
+        "lineup_context_rating",
         "weather_temperature_f",
         "weather_wind_mph",
         "weather_wind_direction_deg",
@@ -432,7 +449,6 @@ def main() -> None:
         "key_factors",
         "expected_lineup",
     ]
-    args.output.parent.mkdir(parents=True, exist_ok=True)
     board[columns].to_csv(args.output, index=False)
 
 
