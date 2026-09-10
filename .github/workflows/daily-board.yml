@@ -40,6 +40,8 @@ jobs:
             models/hr_model.features.json \
             reports/hr_board.csv \
             --date "$TODAY"
+      - name: Apply production scorer
+        run: python -c "from pathlib import Path; from daily_hr.production_scorer import rerank_csv; rerank_csv(Path('reports/hr_board.csv'), Path('reports/hr_board.csv'))"
       - uses: actions/upload-artifact@v4
         with:
           name: daily-hr-board-${{ env.TODAY }}
