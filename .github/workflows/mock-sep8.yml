@@ -1,0 +1,41 @@
+name: mock-sep8-board
+
+on:
+  push:
+    branches:
+      - mock-sep8-board
+
+jobs:
+  board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e .
+      - name: Download pre-Sep-8 Statcast
+        run: daily-hr-ingest "2026-06-01" "2026-09-07" data/raw/statcast.csv --chunk-days 7
+      - name: Build training table
+        run: daily-hr-build data/raw/statcast.csv data/processed/hr_training.parquet
+      - name: Train calibrated model
+        run: daily-hr-train data/processed/hr_training.parquet --model-out models/hr_model.joblib
+      - name: Build Sep 8 mock board
+        run: |
+          python -m daily_hr.daily_board \
+            data/raw/statcast.csv \
+            models/hr_model.joblib \
+            models/hr_model.features.json \
+            reports/hr_board.csv \
+            --date "2026-09-08"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mock-hr-board-2026-09-08
+          path: |
+            reports/hr_board.csv
+            models/hr_model.joblib
+            models/hr_model.features.json
+            data/raw/statcast.csv
+          retention-days: 7
