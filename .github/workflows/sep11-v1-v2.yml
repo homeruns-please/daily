@@ -1,0 +1,49 @@
+name: sep11-v1-v2
+on:
+  push:
+    branches: [sep11-v1-v2]
+    paths:
+      - .github/workflows/sep11-v1-v2.yml
+permissions:
+  contents: write
+jobs:
+  board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - name: Download history through September 10
+        run: daily-hr-ingest "2026-06-01" "2026-09-10" data/raw/statcast.csv --chunk-days 7
+      - name: Train from prior history
+        run: |
+          daily-hr-build data/raw/statcast.csv data/processed/hr_training.parquet
+          daily-hr-train data/processed/hr_training.parquet --model-out models/hr_model.joblib
+      - name: Build September 11 predictions and both rankings
+        run: |
+          python -m daily_hr.daily_board data/raw/statcast.csv models/hr_model.joblib models/hr_model.features.json reports/sep11_inputs.csv --date "2026-09-11"
+          python -m daily_hr.production_scorer reports/sep11_inputs.csv reports/sep11_v1_board.csv
+          python -m daily_hr.v2_scorer reports/sep11_inputs.csv reports/sep11_v2_board.csv
+          python - <<'PY'
+          import pandas as pd
+          for version in (1, 2):
+              board = pd.read_csv(f"reports/sep11_v{version}_board.csv")
+              assert len(board) >= 50, f"Only {len(board)} candidates returned"
+              assert board.model_rank.tolist() == list(range(1, len(board) + 1))
+              assert board.ranking_score.is_monotonic_decreasing
+              board.head(50)[["model_rank", "batter_name"]].to_csv(f"reports/sep11_v{version}_top50.csv", index=False)
+          PY
+      - name: Publish prediction boards
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/sep11*.csv
+          git diff --cached --quiet || git commit -m "Publish September 11 V1 and V2 top 50 predictions [skip ci]"
+          git push origin "HEAD:sep11-v1-v2"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sep11-v1-v2-predictions
+          path: reports/sep11*.csv
