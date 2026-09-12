@@ -24,6 +24,9 @@ def ingest(start: date, end: date, destination: Path, chunk_days: int = 7) -> Pa
         download_statcast(cursor, chunk_end, chunk_path)
         frame = pd.read_csv(chunk_path)
         if not frame.empty:
+            dates = pd.to_datetime(frame["game_date"], errors="raise").dt.date
+            frame = frame.loc[(dates >= cursor) & (dates <= chunk_end)]
+        if not frame.empty:
             frames.append(frame)
         chunk_path.unlink(missing_ok=True)
         cursor = chunk_end + timedelta(days=1)

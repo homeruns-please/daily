@@ -1,0 +1,37 @@
+name: point-in-time-validation
+on:
+  push:
+    branches: [fix/pregame-data-integrity]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest -q
+  retrain:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e .
+      - name: Download strictly pre-September-4 history
+        run: daily-hr-ingest 2026-06-01 2026-09-03 data/raw/statcast.csv --chunk-days 7
+      - name: Train with prior-day features only
+        run: |
+          daily-hr-build data/raw/statcast.csv data/processed/training.parquet
+          daily-hr-train data/processed/training.parquet --model-out models/pregame_model.joblib
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pregame-only-model-through-sep3
+          path: |
+            models/pregame_model.joblib
+            models/pregame_model.features.json
+          if-no-files-found: error
