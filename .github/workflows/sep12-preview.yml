@@ -1,0 +1,53 @@
+name: september-12-preview
+on:
+  push:
+    branches: [fix/pregame-data-integrity]
+    paths: [.github/workflows/sep12-preview.yml]
+permissions:
+  contents: write
+jobs:
+  board:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest -q
+      - name: Update prior-day history
+        run: daily-hr-ingest 2026-06-01 2026-09-11 data/raw/sep12_history.csv --chunk-days 7
+      - name: Retrain corrected model
+        run: |
+          daily-hr-build data/raw/sep12_history.csv data/processed/sep12_training.parquet
+          daily-hr-train data/processed/sep12_training.parquet --model-out models/sep12_pregame.joblib
+      - name: Build preliminary boards
+        run: |
+          python -m daily_hr.daily_board data/raw/sep12_history.csv models/sep12_pregame.joblib models/sep12_pregame.features.json reports/sep12_inputs.csv --date 2026-09-12 --allow-projected
+          python -m daily_hr.production_scorer reports/sep12_inputs.csv reports/sep12_v1_board.csv
+          python -m daily_hr.v2_scorer reports/sep12_inputs.csv reports/sep12_v2_board.csv
+          python - <<'PY'
+          import pandas as pd
+          for version in ('v1', 'v2'):
+              board = pd.read_csv(f'reports/sep12_{version}_board.csv')
+              assert len(board) >= 50, f'Insufficient coverage: {len(board)}'
+              assert (pd.to_datetime(board.history_through) < pd.Timestamp('2026-09-12')).all()
+              assert not board.duplicated(['batter', 'game_pk']).any()
+              board.head(50).to_csv(f'reports/sep12_{version}_top50.csv', index=False)
+              print(version, len(board), 'players;', board.expected_lineup.value_counts().to_dict())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sep12-preliminary-boards-and-model
+          path: |
+            reports/sep12*
+            models/sep12*
+          if-no-files-found: error
+      - name: Save dated preview
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/sep12*
+          git commit -m "Save September 12 preliminary V1 and V2 boards [skip ci]"
+          git push
