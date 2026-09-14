@@ -12,7 +12,7 @@ import pandas as pd
 import requests
 
 from .dataset import PREGAME_FEATURES, prediction_features
-from .matchups import build_matchup_features
+from .matchups_candidate import build_matchup_features
 from .weather import get_weather
 
 MLB_API = "https://statsapi.mlb.com/api/v1"
