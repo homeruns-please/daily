@@ -1,0 +1,65 @@
+name: sep14-candidate-rescore
+on:
+  push:
+    branches: [candidate/handedness-v1]
+    paths: [.github/workflows/sep14-candidate.yml]
+permissions:
+  contents: write
+jobs:
+  rescore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest -q
+      - run: daily-hr-ingest 2026-06-01 2026-09-13 data/raw/candidate_history.csv --chunk-days 7
+      - name: Rescore frozen player universe
+        run: |
+          python - <<'PY'
+          import pandas as pd
+          from daily_hr.matchups_candidate import build_matchup_features
+          from daily_hr.production_scorer import score_board
+          board = pd.read_csv('reports/sep14_v1_board.csv')
+          raw = pd.read_csv('data/raw/candidate_history.csv', low_memory=False)
+          raw = raw[pd.to_datetime(raw.game_date) < pd.Timestamp('2026-09-14')]
+          assert str(pd.to_datetime(raw.game_date).max().date()) == str(board.history_through.iloc[0]), 'History cutoff changed'
+          old = board[['batter', 'game_pk', 'model_rank']].rename(columns={'model_rank': 'original_v1_rank'})
+          results = []
+          for row in board.itertuples():
+              if pd.isna(row.opposing_pitcher_id):
+                  results.append({})
+              else:
+                  results.append(build_matchup_features(raw, int(row.batter), int(row.opposing_pitcher_id), pd.Timestamp('2026-09-14')))
+          features = pd.DataFrame(results, index=board.index)
+          for metric, rating in [('pitch_matchup_hr_rate','pitch_matchup_edge_rating'), ('pitch_matchup_pitcher_hr_allowed_rate','pitcher_vulnerability_rating')]:
+              board[metric] = features[metric]
+              board[rating] = (1 + 9 * features[metric].rank(pct=True).fillna(.5)).round(1)
+          board['matchup_rating'] = board.pitch_matchup_edge_rating
+          board['pitch_mix_coverage'] = features.pitch_mix_coverage
+          board['model_version'] = 'v1_handedness_candidate'
+          board['rescored_at_utc'] = pd.Timestamp.now(tz='UTC').isoformat()
+          board['rescore_note'] = 'Frozen Sep14 inputs; refreshed history through same cutoff; matchup-only change'
+          out = score_board(board).merge(old, on=['batter','game_pk'], validate='one_to_one')
+          out['rank_improvement'] = out.original_v1_rank - out.model_rank
+          assert len(out) == len(board)
+          out.to_csv('reports/sep14_candidate_board.csv', index=False)
+          out.head(50).to_csv('reports/sep14_candidate_top50.csv', index=False)
+          changes = out[(out.model_rank <= 50) | (out.original_v1_rank <= 50)]
+          changes[['batter_name','original_v1_rank','model_rank','rank_improvement']].to_csv('reports/sep14_candidate_changes.csv', index=False)
+          print('New entrants:', out[(out.model_rank <= 50) & (out.original_v1_rank > 50)].batter_name.tolist())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sep14-candidate-comparison
+          path: reports/sep14_candidate*
+      - name: Save candidate
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add reports/sep14_candidate*
+          git commit -m "Save Sep14 matchup candidate comparison [skip ci]"
+          git push
