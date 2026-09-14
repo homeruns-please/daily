@@ -62,6 +62,10 @@ def _request(url: str, game_date: date, latitude: float, longitude: float) -> di
 
 def get_weather(game_date: date, venue: str, game_time: datetime | None = None) -> dict[str, float | None]:
     """Return weather at the observation closest to first pitch."""
+    if game_date < datetime.now(UTC).date():
+        # Observed historical weather is not an archived pregame forecast.
+        return {"temperature_f": None, "wind_mph": None, "wind_direction_deg": None,
+                "relative_humidity": None, "pressure_msl_hpa": None}
     if venue not in PARK_COORDS:
         raise ValueError(f"Unknown venue coordinates: {venue}")
     lat, lon = PARK_COORDS[venue]

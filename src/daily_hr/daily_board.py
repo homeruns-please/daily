@@ -11,7 +11,7 @@ import joblib
 import pandas as pd
 import requests
 
-from .dataset import build_batter_games
+from .dataset import PREGAME_FEATURES, prediction_features
 from .matchups import build_matchup_features
 from .weather import get_weather
 
@@ -139,9 +139,19 @@ def _expected_lineup(team_name: str, day: date) -> list[dict]:
     return []
 
 
-def _lineup(game: dict) -> list[dict]:
+def _lineup(game: dict, confirmed_only: bool = False) -> list[dict]:
     """Prefer schedule-hydrated/live lineups; otherwise use the recent expected lineup."""
     rows = _schedule_lineup(game) or _feed_lineup(game["gamePk"])
+    if confirmed_only:
+        # Require both complete announced lineups before scoring a game.
+        teams = game.get("teams", {})
+        names = [teams.get(side, {}).get("team", {}).get("name", "") for side in ("away", "home")]
+        complete = all(
+            len([r for r in rows if r["team"] == name]) == 9
+            and len({r["batter"] for r in rows if r["team"] == name}) == 9
+            for name in names
+        )
+        return rows if complete else []
     if rows:
         return rows
     teams = game.get("teams", {})
@@ -362,16 +372,27 @@ def _add_signal_breakdown(board: pd.DataFrame) -> pd.DataFrame:
     return board
 
 
-def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date) -> pd.DataFrame:
+def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date,
+                confirmed_only: bool = True) -> pd.DataFrame:
     raw = pd.read_csv(raw_csv)
-    historical = build_batter_games(raw)
-    model = joblib.load(model_path)
+    raw = raw.loc[pd.to_datetime(raw["game_date"], errors="raise").dt.date < day].copy()
+    if raw.empty:
+        raise ValueError("No history strictly before target day")
     features = json.loads(features_path.read_text())
-    latest = historical.sort_values(["batter", "game_date", "game_pk"]).groupby("batter").tail(1)
+    if set(features) != set(PREGAME_FEATURES) or len(features) != len(PREGAME_FEATURES):
+        raise ValueError("Unsafe or obsolete model feature manifest; retrain with pregame-only features")
+    model = joblib.load(model_path)
+    latest = prediction_features(raw, day)
 
     candidates: list[dict] = []
     games = _today_games(day)
+    eligible_games = []
     for game in games:
+        if confirmed_only and (
+            game.get("status", {}).get("abstractGameState") != "Preview"
+            or datetime.fromisoformat(game["gameDate"]) <= datetime.now(UTC)
+        ):
+            continue
         teams = game.get("teams", {})
         away = teams.get("away", {})
         home = teams.get("home", {})
@@ -380,7 +401,12 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
         home_pitcher = home.get("probablePitcher", {}).get("fullName", "TBD")
         away_pitcher_id = away.get("probablePitcher", {}).get("id")
         home_pitcher_id = home.get("probablePitcher", {}).get("id")
-        for row in _lineup(game):
+        if confirmed_only and (not away_pitcher_id or not home_pitcher_id):
+            continue
+        lineup = _lineup(game, confirmed_only=confirmed_only)
+        if lineup:
+            eligible_games.append(game)
+        for row in lineup:
             row["game_time"] = game.get("gameDate", "")
             row["game_pk"] = game.get("gamePk")
             row["venue"] = game.get("venue", {}).get("name", "")
@@ -399,10 +425,17 @@ def build_board(raw_csv: Path, model_path: Path, features_path: Path, day: date)
     board["hr_probability"] = model.predict_proba(X)
     board = _add_matchup_context(board, raw, day)
     board = _add_park_context(board)
-    board = _add_weather_context(board, games, day)
+    board = _add_weather_context(board, eligible_games, day)
     board = _add_signal_breakdown(board)
     board = board.sort_values("ranking_score", ascending=False).reset_index(drop=True)
     board["model_rank"] = board.index + 1
+    board["target_date"] = day.isoformat()
+    board["generated_at_utc"] = datetime.now(UTC).isoformat()
+    board["history_through"] = str(pd.to_datetime(raw["game_date"]).max().date())
+    board["board_mode"] = "confirmed_pregame" if confirmed_only else "projected_or_reconstructed"
+    board["weather_source"] = "unavailable_historical_forecast" if day < datetime.now(UTC).date() else "forecast_or_neutral"
+    board.attrs["coverage"] = {"scheduled_games": len(games), "included_games": len(eligible_games),
+                               "omitted_game_ids": [g["gamePk"] for g in games if g not in eligible_games]}
     return _assign_ratings(board)
 
 
@@ -413,15 +446,20 @@ def main() -> None:
     parser.add_argument("features", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--date", default=datetime.now(UTC).date().isoformat())
+    parser.add_argument("--allow-projected", action="store_true",
+                        help="Explicitly allow projected/reconstructed lineups; not a confirmed pregame board")
     args = parser.parse_args()
     board = build_board(
         raw_csv=args.raw_csv,
         model_path=args.model,
         features_path=args.features,
         day=date.fromisoformat(args.date),
+        confirmed_only=not args.allow_projected,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     columns = [
+        "target_date", "generated_at_utc", "history_through", "board_mode", "weather_source",
+        "batter", "game_pk", "opposing_pitcher_id",
         "model_rank",
         "batter_name",
         "team",
@@ -450,6 +488,7 @@ def main() -> None:
         "expected_lineup",
     ]
     board[columns].to_csv(args.output, index=False)
+    args.output.with_suffix(".coverage.json").write_text(json.dumps(board.attrs.get("coverage", {}), indent=2))
 
 
 if __name__ == "__main__":

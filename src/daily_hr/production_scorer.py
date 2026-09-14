@@ -43,8 +43,9 @@ def _column_or_fallback(board: pd.DataFrame, column: str, fallback: float) -> pd
     return pd.Series(fallback, index=board.index, dtype=float)
 
 
-def score_board(board: pd.DataFrame) -> pd.DataFrame:
+def score_board(board: pd.DataFrame, *, weights: dict[str, float] | None = None) -> pd.DataFrame:
     """Apply the production ranking to an already-built daily board."""
+    weights = WEIGHTS if weights is None else weights
     required = {
         "baseline_rating",
         "park_rating",
@@ -84,23 +85,23 @@ def score_board(board: pd.DataFrame) -> pd.DataFrame:
     lineup = lineup.clip(0.0, 1.0).fillna(0.5)
 
     board["production_score"] = (
-        WEIGHTS["baseline"] * baseline
-        + WEIGHTS["pitcher_vulnerability"] * pitcher
-        + WEIGHTS["pitch_matchup"] * matchup
-        + WEIGHTS["power_upside"] * power
-        + WEIGHTS["park"] * park
-        + WEIGHTS["weather"] * weather
-        + WEIGHTS["lineup"] * lineup
+        weights["baseline"] * baseline
+        + weights["pitcher_vulnerability"] * pitcher
+        + weights["pitch_matchup"] * matchup
+        + weights["power_upside"] * power
+        + weights["park"] * park
+        + weights["weather"] * weather
+        + weights["lineup"] * lineup
     )
     board["ranking_score"] = board["production_score"]
-    board = board.sort_values("production_score", ascending=False).reset_index(drop=True)
+    board = board.sort_values("production_score", ascending=False, kind="stable").reset_index(drop=True)
     board["model_rank"] = board.index + 1
     n = len(board)
     if n == 1:
         board["hr_rating"] = 10.0
     else:
         board["hr_rating"] = (10.0 - 9.0 * board.index / (n - 1)).round(1)
-    board["rating"] = board["hr_rating"].map(LABELS)
+    board["rating"] = board["hr_rating"].round().map(LABELS)
     return board
 
 
@@ -109,3 +110,19 @@ def rerank_csv(input_path: Path, output_path: Path) -> pd.DataFrame:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     board.to_csv(output_path, index=False)
     return board
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Apply V1 HR ranking to a board CSV")
+    parser.add_argument("input_csv", type=Path)
+    parser.add_argument("output_csv", type=Path)
+    args = parser.parse_args()
+    rerank_csv(args.input_csv, args.output_csv)
+
+
+if __name__ == "__main__":
+    main()
+
+

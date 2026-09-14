@@ -9,6 +9,7 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
+from .dataset import PREGAME_FEATURES
 from .model import evaluate, fit_calibrated_model
 
 
@@ -20,8 +21,10 @@ def train_file(path: Path, date_column: str = "game_date", target_column: str = 
     dates = pd.to_datetime(df[date_column])
     train_cut = dates.quantile(0.70)
     cal_cut = dates.quantile(0.85)
-    excluded = {date_column, target_column, "game_date", "batter", "game_pk", "home_runs"}
-    features = [c for c in df.columns if c not in excluded and pd.api.types.is_numeric_dtype(df[c])]
+    features = list(PREGAME_FEATURES)
+    missing = set(features) - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing pregame features: {sorted(missing)}")
     X = df[features].replace([float("inf"), float("-inf")], pd.NA).fillna(0)
     y = df[target_column].astype(int)
     train = dates < train_cut

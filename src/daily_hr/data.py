@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -30,8 +30,8 @@ def download_statcast(start: date, end: date, destination: Path) -> Path:
     params = {
         "all": "true",
         "hfGT": "R|",
-        "game_date_gt": (start - timedelta(days=1)).isoformat(),
-        "game_date_lt": (end + timedelta(days=1)).isoformat(),
+        "game_date_gt": start.isoformat(),
+        "game_date_lt": end.isoformat(),
         "group_by": "name",
         "min_pitches": 0,
         "min_results": 0,

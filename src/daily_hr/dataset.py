@@ -10,6 +10,17 @@ import pandas as pd
 from .pipeline import normalize_statcast
 
 WINDOWS = (5, 10, 20)
+ROLL_COLUMNS = (
+    "home_runs", "plate_appearances", "barrel_pct", "hard_hit_pct",
+    "fly_ball_pct", "launch_angle_avg", "exit_velocity_avg",
+)
+PREGAME_FEATURES = [
+    f"{column}_last_{window}" for window in WINDOWS for column in ROLL_COLUMNS
+] + [
+    "hr_per_pa_last_20", "hr_per_pa_last_5", "hr_rate_change_5_vs_20",
+    "barrel_rate_change_5_vs_20", "hard_hit_rate_change_5_vs_20",
+    "exit_velocity_change_5_vs_20", "fly_ball_change_5_vs_20", "barrel_to_hr_gap_20",
+]
 
 
 def _barrel_flag(df: pd.DataFrame) -> pd.Series:
@@ -68,7 +79,31 @@ def build_batter_games(statcast: pd.DataFrame) -> pd.DataFrame:
     out["exit_velocity_change_5_vs_20"] = out["exit_velocity_avg_last_5"] - out["exit_velocity_avg_last_20"]
     out["fly_ball_change_5_vs_20"] = out["fly_ball_pct_last_5"] - out["fly_ball_pct_last_20"]
     out["barrel_to_hr_gap_20"] = out["barrel_pct_last_20"] - out["hr_per_pa_last_20"]
+    # Both games of a doubleheader use the same prior-day snapshot.
+    first = out.drop_duplicates(["batter", "game_date"], keep="first")
+    out = out.drop(columns=PREGAME_FEATURES).merge(
+        first[["batter", "game_date", *PREGAME_FEATURES]],
+        on=["batter", "game_date"], how="left", validate="many_to_one",
+    )
     return out
+
+
+def prediction_features(raw: pd.DataFrame, day) -> pd.DataFrame:
+    """Build target-day rolls, including the latest completed prior game."""
+    history = raw.loc[pd.to_datetime(raw["game_date"]).dt.date < pd.Timestamp(day).date()].copy()
+    if history.empty:
+        raise ValueError("No history strictly before target day")
+    targets = pd.DataFrame({
+        "batter": history["batter"].unique(),
+        "game_date": pd.Timestamp(day).date(),
+        "game_pk": -1,
+        "events": None,
+        "launch_speed": float("nan"),
+        "launch_angle": float("nan"),
+        "bb_type": None,
+    })
+    table = build_batter_games(pd.concat([history, targets], ignore_index=True))
+    return table.loc[table["game_pk"].eq(-1), ["batter", *PREGAME_FEATURES]]
 
 
 def build_dataset(input_csv: Path, output_parquet: Path) -> Path:
